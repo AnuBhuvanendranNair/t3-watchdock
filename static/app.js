@@ -190,7 +190,7 @@ async function loadT3mSummary(pre) {
   }).join("");
   box.innerHTML = `<div class="head" style="margin-bottom:8px"><div><h2 style="margin:0">TYPO3 status – Production &amp; Staging</h2>
       <div class="sub">From the last t3monitor check · <a href="#/scheduler">Scheduler</a> · “–” = not configured</div></div></div>
-    <div class="wrap"><table><thead><tr><th>Project</th><th>Prod TYPO3</th><th>Prod E/W</th><th>Staging TYPO3</th><th>Staging E/W</th>
+    <div class="wrap"><table class="typo3-overview"><thead><tr><th>Project</th><th>Prod TYPO3</th><th>Prod E/W</th><th>Stg TYPO3</th><th>Stg E/W</th>
       <th title="Oldest check of the configured instances">Last check</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
