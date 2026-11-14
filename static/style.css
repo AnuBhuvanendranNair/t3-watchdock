@@ -180,6 +180,10 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
 .kpi{border:1px solid var(--bd);border-radius:10px;padding:10px 12px}
 .kpi .v{font-size:18px;font-weight:700;margin-top:2px}
+.srv{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));border:1px solid var(--bd);border-radius:10px;margin:-4px 0 16px}
+.srv>div{padding:8px 12px;min-width:0;border-left:1px solid var(--bd)}
+.srv>div:first-child{border-left:0}
+.srv-v{font-weight:600;font-size:13px;margin-top:2px;overflow-wrap:anywhere}
 details{border-top:1px solid var(--bd);padding-top:10px;margin-top:14px}
 summary{cursor:pointer;font-weight:600;font-size:14px;margin-bottom:8px}
 details.t3env{margin-top:18px}
@@ -211,6 +215,21 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 .tl .when{font-size:12px;color:var(--mut)}
 .tl ul{margin:4px 0 0;padding-left:18px;font-size:13px}
 
+[hidden]{display:none!important}   /* themes must not override the hidden attribute */
+.srvline{display:grid;grid-template-columns:auto auto auto 1fr;gap:3px 12px;align-items:center;font-size:12px;margin-top:10px;padding-top:8px;border-top:1px dashed var(--bd)}
+.srvline .h{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.srvline .env{font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;text-align:center}
+.srvline .env.prod{background:var(--acc);color:var(--acc-fg)}
+.srvline .env.stg{border:1px solid var(--acc);color:var(--acc)}
+.srvline .diff,.srvline .upd{color:var(--run);font-weight:700}
+.srvline:empty{display:none}
+.extupd{background:color-mix(in srgb,var(--acc) 12%,transparent)}
+.extupd.major{background:color-mix(in srgb,var(--run) 16%,transparent)}
+.srvlegend .upd,.srvlegend .diff{color:var(--run);font-weight:700}
+.srvtags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.srvtag{font-size:11px;padding:1px 6px;border-radius:6px;background:var(--chip);white-space:nowrap}
+.srvtag .h{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.srvtag.diff{color:var(--run);font-weight:700}
 /* Confirmation dialog for destructive actions (type the name to confirm) */
 .confirm-dlg{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:10px;padding:20px;
   max-width:440px;width:calc(100% - 32px);box-sizing:border-box}

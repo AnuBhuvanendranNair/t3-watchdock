@@ -9,7 +9,7 @@ from pathlib import Path
 from .core import ALLOWED_HOSTS, BASE, CONFIG, HOST, STATE, TLS_CERT, TLS_KEY, TLS_PORT, TOKEN_FILE, config, load, lock, log, now, save, stop_event
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
 from .extensions import ext_changelog
-from .gitlab import find_project, gitlab, project_info, promote, run_pipeline, save_token, search_projects, test_token, token_source
+from .gitlab import find_project, gitlab, project_info, promote, require_ci, run_pipeline, save_token, search_projects, test_token, token_source
 from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_fetch, t3m_key, t3m_key_file, t3m_summary, t3m_view
 from .watcher import resume_mail_watches
 from .projects import add_project, update_project
@@ -129,6 +129,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"msg": send_now(find_project(body["project"]))})
             if path == "/api/play":
                 p = find_project(body["project"])
+                require_ci(p)
                 r = gitlab(p, "POST", f"/jobs/{int(body['job'])}/play")
                 log(f"Manual job '{r.get('name')}' started in {p['id']}")
                 return self._send(200, r)

@@ -16,7 +16,7 @@ TOKEN_FALLBACK = Path.home() / ".gitlab-token"     # optional fallback
 SMTP_PASSWORD_FILE = DATA / ".smtp-password"        # stored by the app (chmod 600)
 TEAMS_FILE = DATA / ".teams-webhook"                # Teams webhook URL, a secret (chmod 600)
 T3M_DIR = DATA / "t3monitor"                        # t3monitor history per project
-T3M_REPORTS = "internal,security,installed_extensions"
+T3M_REPORTS = "internal,security,installed_extensions,system"   # system: PHP, database, OS, web server
 T3M_KEEP = 300                                      # snapshots (= changes) kept per project
 PACKAGIST = "https://repo.packagist.org/p2/"         # extension update check (public package metadata only)
 PKG_TTL = 3600                                       # seconds a package's version list is cached

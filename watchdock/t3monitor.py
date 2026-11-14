@@ -89,6 +89,17 @@ def t3m_is_local(composer, version):
     return composer.split("/")[0] in vendors or version.startswith("dev-")
 
 
+# Server info taken from the "system" report: field -> (status item, label)
+T3M_SERVER = {"php": ("Php", "PHP"), "db": ("MysqlVersion", "Database"), "webserver": ("Webserver", "Web server"),
+              "os": ("OperatingSystem", "OS")}
+
+
+def _os_short(uname):
+    """'Linux <hostname> 6.12.95+deb13 #1 SMP ...' -> 'Linux 6.12.95+deb13' (no hostname)."""
+    p = uname.split()
+    return " ".join(p[:1] + p[2:3]) if len(p) >= 3 else uname
+
+
 def t3m_parse(xml):
     """Keep only technical data (no backend users, no paths)."""
     root = ET.fromstring(xml)
@@ -98,7 +109,7 @@ def t3m_parse(xml):
             version, composer = (e.findtext("version") or "").strip(), (e.findtext("composer/name") or "").strip()
             exts[e.findtext("ext")] = {"version": version, "title": _plain(e.findtext("title"), 120),
                                        "composer": composer, "local": t3m_is_local(composer, version)}
-    status, version = [], None
+    status, version, server = [], None, {}
     for g in root.find("reports") if root.find("reports") is not None else []:
         for i in g:
             iid = f"{g.tag}/{i.get('index', i.tag) if i.tag == 'numIndex' else i.tag}"
@@ -109,9 +120,14 @@ def t3m_parse(xml):
             value = _plain(i.findtext("value"), 200)
             if g.tag == "typo3" and i.tag == "Typo3Version":
                 version = value
+            if g.tag == "system" and i.tag == "OperatingSystem":
+                value = _os_short(value)
+            for k, (tag, _) in T3M_SERVER.items():
+                if g.tag == "system" and i.tag == tag and value:
+                    server[k] = value
             status.append({"id": iid, "group": g.tag, "title": _plain(i.findtext("title"), 150) or i.tag,
                            "value": value, "severity": sev, "message": _plain(i.findtext("message"))})
-    return {"site_name": _plain(root.findtext("site_name"), 200), "typo3": version,
+    return {"site_name": _plain(root.findtext("site_name"), 200), "typo3": version, **server,
             "extensions": dict(sorted(exts.items())), "status": status}
 
 
@@ -127,6 +143,11 @@ def t3m_changes(old, new):
     ch = []
     if old.get("typo3") != new.get("typo3"):
         ch.append(f"TYPO3 {old.get('typo3') or '?'} → {new.get('typo3') or '?'}")
+    first = [f"{lbl} {new[k]}" for k, (_, lbl) in T3M_SERVER.items() if new.get(k) and not old.get(k)]
+    if first:
+        ch.append("Server info: " + ", ".join(first))
+    ch += [f"{lbl} {old[k]} → {new.get(k) or '?'}" for k, (_, lbl) in T3M_SERVER.items()
+           if old.get(k) and old[k] != new.get(k)]
     oe, ne = _t3m_public(old), _t3m_public(new)
     for k in sorted(set(oe) | set(ne)):
         if k not in oe:
@@ -148,7 +169,7 @@ def t3m_changes(old, new):
 
 def _t3m_signature(d):
     """Fields that define a change (status values like times are ignored)."""
-    return json.dumps([d.get("typo3"), {k: v["version"] for k, v in _t3m_public(d).items()},
+    return json.dumps([d.get("typo3"), [d.get(k) for k in T3M_SERVER], {k: v["version"] for k, v in _t3m_public(d).items()},
                        sorted((x["id"], x["severity"]) for x in d.get("status", []))])
 
 
@@ -272,8 +293,10 @@ def t3m_summary():
             h = load(t3m_history_file(p["id"], env), {"snapshots": []})
             c = h["snapshots"][0]["data"] if h.get("snapshots") else {}
             sev = [x.get("severity") for x in c.get("status", [])]
+            upd = [x for x in (c.get("extensions") or {}).values() if not x.get("local") and x.get("update")]
             out.setdefault(p["id"], {})[env] = {
-                "typo3": c.get("typo3"), "errors": sev.count(2), "warnings": sev.count(1), "has_data": bool(c),
+                "typo3": c.get("typo3"), **{k: c.get(k) for k in T3M_SERVER}, "errors": sev.count(2), "warnings": sev.count(1), "has_data": bool(c),
+                "ext_updates": len(upd), "ext_major": sum(1 for x in upd if x.get("major")),
                 "last_check": h.get("last_check"), "last_error": h.get("last_error")}
     return out
 

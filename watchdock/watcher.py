@@ -97,7 +97,7 @@ def announce_update(due):
 
 def check_typo3():
     """Returns (projects with auto-update, list of errors). Errors make the scheduler run count as failed."""
-    projects = [p for p in config()["projects"] if p.get("auto_typo3", {}).get("enabled")]
+    projects = [p for p in config()["projects"] if p.get("auto_typo3", {}).get("enabled") and p.get("ci") is not False]
     latest, errors = {}, []
     for major in sorted({int(p["auto_typo3"]["major"]) for p in projects}):
         try:
