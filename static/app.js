@@ -81,7 +81,7 @@ async function render() {
 }
 
 /* ---------------- views ---------------- */
-function viewProjects() {
+function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload needed
   const cards = S.projects.map(p => {
     const last = S.runs.find(r => r.project === p.id);
     const a = p.auto_typo3 || {};
@@ -104,13 +104,17 @@ function viewProjects() {
         <a class="btn sec" href="#/new">+ New project</a></div></div>
     ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">No projects yet. <a href="#/new">Create one</a>.</div>`}
     ${S.projects.length ? `<div class="card full" id="t3sum" style="margin-top:18px"><h2>TYPO3 status – Production &amp; Staging</h2><p class="empty">Loading…</p></div>` : ""}`;
-  if (S.projects.length) loadT3mSummary();
+  if (!S.projects.length) return;
+  if (!T3SUM) return loadT3mSummary();               // first visit: fetch once
+  loadT3mSummary(T3SUM);                             // cached data at once (synchronous, no flash) ...
+  if (!fresh) loadT3mSummary();                      // ... then update in the background
 }
 
 // Overview table on the home page: TYPO3 version + errors/warnings per instance (data from the last t3monitor check)
-async function loadT3mSummary() {
+let T3SUM = null;                  // last /api/t3monitor/summary response (reused on re-render: no "Loading…" flash)
+async function loadT3mSummary(pre) {
   let d;
-  try { d = await api("/api/t3monitor/summary"); }
+  try { d = pre ?? await api("/api/t3monitor/summary"); T3SUM = d; }
   catch (err) { if ($("#t3sum")) $("#t3sum").innerHTML = `<h2>TYPO3 status</h2><p class="empty">Error: ${esc(err.message)}</p>`; return; }
   const box = $("#t3sum"); if (!box) return;
   const ver = x => {
@@ -730,9 +734,16 @@ document.addEventListener("click", e => {
 
 window.addEventListener("hashchange", render);
 render();
-setInterval(async () => {          // refresh list views only; never interrupt forms or pipeline view
-  const h = location.hash.slice(1) || "/";
+setInterval(async () => {          // refresh list views only when their data changed; never interrupt forms or pipeline view
+  if (document.hidden) return;     // background tab: no polling
+  const h = location.hash.slice(1) || "/", prevS = JSON.stringify(S), prevSum = JSON.stringify(T3SUM);
   await refresh();
-  if (h === "/" ) viewProjects(); else if (h === "/activity") viewActivity();
+  const changed = JSON.stringify(S) !== prevS;
+  if (h === "/" && S.projects.length) {
+    let sum; try { sum = await api("/api/t3monitor/summary"); } catch { return; }
+    if (changed || JSON.stringify(sum) !== prevSum) { T3SUM = sum; viewProjects(true); }
+  } else if (!changed) return;
+  else if (h === "/") viewProjects();
+  else if (h === "/activity") viewActivity();
   else if (h === "/scheduler" && !viewScheduler.dirty) viewScheduler();
 }, 30000);
