@@ -210,3 +210,11 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 .tl li{padding:8px 0 8px 14px;border-left:2px solid var(--bd);margin-left:4px}
 .tl .when{font-size:12px;color:var(--mut)}
 .tl ul{margin:4px 0 0;padding-left:18px;font-size:13px}
+
+/* Confirmation dialog for destructive actions (type the name to confirm) */
+.confirm-dlg{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:10px;padding:20px;
+  max-width:440px;width:calc(100% - 32px);box-sizing:border-box}
+.confirm-dlg::backdrop{background:rgb(0 0 0 / .5)}
+.confirm-dlg h2{margin:0 0 8px;color:var(--err)}
+.confirm-dlg input{display:block;width:100%;box-sizing:border-box;margin:6px 0 14px}
+.confirm-dlg .actions{display:flex;justify-content:flex-end;gap:8px}
