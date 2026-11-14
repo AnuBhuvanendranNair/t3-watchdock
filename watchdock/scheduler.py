@@ -6,7 +6,8 @@ import threading
 
 from .core import CONFIG, STATE, config, load, lock, log, now, save, stop_event
 from .alerts import notify_event
-from .t3monitor import T3M_ENVS, _n, _upd_text, t3m_cfg, t3m_fetch, t3m_key
+from .security import advisories, php_cycles, php_status, site_advisories, site_packages
+from .t3monitor import T3M_ENVS, _n, _upd_text, t3m_cfg, t3m_fetch, t3m_history_file, t3m_key
 from .watcher import check_typo3
 from .updates import send_update_commands
 
@@ -68,6 +69,50 @@ def task_t3monitor():
     return f"{len(sites)}/{len(sites)} site(s) checked"
 
 
+def task_security():
+    """PHP support status and security advisories of every site, from its last t3monitor snapshot.
+    One summary message per run, only when there are findings not reported before."""
+    sites = []
+    for p in config()["projects"]:
+        for env in T3M_ENVS:
+            if t3m_cfg(p, env).get("url") and t3m_key(p["id"], env):
+                snaps = load(t3m_history_file(p["id"], env), {"snapshots": []}).get("snapshots")
+                if snaps:
+                    sites.append((p, env, snaps[0]["data"]))
+    if not sites:
+        return "No t3monitor data yet (run the t3monitor check first)"
+    cycles = php_cycles()
+    adv = advisories({k for _, _, d in sites for k in site_packages(d)})
+    facts, n_adv, n_php, n_new = [], 0, 0, 0
+    for p, env, d in sites:
+        php = php_status(d.get("php"), cycles) if d.get("php") else None
+        found = site_advisories(site_packages(d), adv)
+        keys = {f"adv:{a['id']}:{a['package']}:{a['version']}" for a in found}
+        if php and php["severity"]:
+            keys.add(f"php:{php['state']}:{php['version']}:{php.get('latest')}")
+        with lock:
+            hf = t3m_history_file(p["id"], env)
+            h = load(hf, {"snapshots": []})
+            new = keys - set((h.get("security") or {}).get("reported", []))
+            h["security"] = {"checked": now(), "php": php, "advisories": found, "reported": sorted(keys)}
+            save(hf, h)
+        n_adv += len(found)
+        n_php += bool(php and php["severity"])
+        n_new += len(new)
+        if found or (php and php["severity"]):
+            line = ([("NEW " if any(k.startswith("php:") for k in new) else "") + php["text"]]
+                    if php and php["severity"] else [])
+            line += [("NEW " if f"adv:{a['id']}:{a['package']}:{a['version']}" in new else "")
+                     + f"{a['package']} {a['version']}: {a['title']}" + (f" ({a['severity']})" if a.get("severity") else "")
+                     + (f" {a['link']}" if a.get("link") else "") for a in found]
+            facts.append((f"{p['name']} ({T3M_ENVS[env]['label']})", " · ".join(line)))
+    summary = f"{_n(len(sites), 'site')} · {n_adv} security {'advisory' if n_adv == 1 else 'advisories'} · {_n(n_php, 'PHP issue')}"
+    if n_new:
+        notify_event(f"Security check: {n_new} new finding(s)", "Scheduled PHP version and security advisory check.",
+                     facts, f"http://127.0.0.1:{int(config().get('port', 8787))}/", "Open launcher")
+    return summary + (f" · {n_new} new" if n_new else "")
+
+
 TASKS = {
     "typo3_release": {"name": "TYPO3 release check", "run": task_typo3_release, "legacy": "check_interval_hours",
                       "description": "Checks get.typo3.org for new TYPO3 releases; on a new version the update "
@@ -75,13 +120,18 @@ TASKS = {
     "t3monitor": {"name": "t3monitor check (TYPO3 & extensions)", "run": task_t3monitor, "legacy": "t3monitor_interval_hours",
                   "description": "Reads TYPO3 version, extensions and status checks of every project with "
                                  "t3monitor URL and key, and records changes in the history."},
+    "security": {"name": "PHP version & security advisories", "run": task_security, "legacy": "security_interval_hours",
+                 "defaults": {"mode": "daily", "time": "07:00"},
+                 "description": "Checks the PHP version of every site against php.net support dates (endoflife.date) "
+                                "and TYPO3 core and extensions against known security advisories (Packagist). "
+                                "Uses the data of the last t3monitor check; messages only for new findings."},
 }
 
 
 def sched_cfg(tid):
     c = config()
     d = {"enabled": True, "mode": "interval", "hours": float(c.get(TASKS[tid]["legacy"], 6)),
-         "time": "07:00", "days": list(range(7))}
+         "time": "07:00", "days": list(range(7)), **TASKS[tid].get("defaults", {})}
     d.update((c.get("scheduler") or {}).get(tid) or {})
     return d
 

@@ -36,7 +36,8 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 - **TYPO3 status (t3monitor)** — reads TYPO3 version, extensions and status checks from sites with the [t3monitor](https://github.com/BrainAppeal/t3monitor) extension, plus server info (PHP, database, web server, OS kernel without hostname), for the production and (optionally) the staging instance of a project; shown on the project page with a change history (see below)
 - **Extension updates & changelogs** — newest compatible release per extension from Packagist (major updates marked separately); click an extension row to read the changelog of that release
 - **TYPO3 overview on the home page** — table with TYPO3 version (↑ = update available), PHP / database / web server versions and errors/warnings of production and staging per project, *versions differ* / *PHP differs* markers and the oldest last check; data from the last t3monitor check
-- **Scheduler** — page to set when the TYPO3 release check and the t3monitor check run: every N hours or daily at a fixed time on chosen weekdays; shows last run, result and next run, with *Run now*
+- **PHP version & security advisories** — scheduled check of every instance: PHP version against [endoflife.date](https://endoflife.date/php) (*end of life*, *security fixes only*, newer patch release available) and TYPO3 core (`typo3/cms-core`) plus public extensions against the [Packagist security advisories](https://packagist.org/apidoc#list-security-advisories) (FriendsOfPHP, GitHub). Uses the data of the last t3monitor check (no extra request to the sites). Results: *Security* section on the project page, *SA* / *PHP* badges in the overview; Teams/email message only for findings not reported before
+- **Scheduler** — page to set when the TYPO3 release check, the t3monitor check and the security check run: every N hours or daily at a fixed time on chosen weekdays; shows last run, result and next run, with *Run now*
 - **Run history & log** — kept in `state.json` (last 100 runs, 200 log entries)
 - **Save & close** — Scheduler and Settings forms have *Save* (stay on the page) and *Save & close* (back to Projects)
 - **Flash messages** — results and errors appear top right (green ✓ / red ⚠; 6 s, errors 12 s; click to close)
@@ -115,10 +116,11 @@ Page *Scheduler* (top menu) lists the automatic tasks:
 |---|---|
 | TYPO3 release check | Checks `get.typo3.org`; on a new release: Teams announcement, then the update pipelines on staging |
 | t3monitor check (TYPO3 & extensions) | Reads TYPO3 version, extensions and status checks of every instance (production, staging) with t3monitor URL and key |
+| PHP version & security advisories | For every instance with t3monitor data: PHP version against support dates (end of life, newer patch release), TYPO3 core and public extensions against known security advisories; one message per run, only for new findings |
 
 - Per task: on/off, *Every N hours* (0.25–168) or *Daily at a fixed time* on chosen weekdays; shows last run, result and next run; **▶ Run now**.
 - Tasks run only while the launcher runs (checked every 30 s). A run missed while it was off starts right after the next start.
-- Default until a schedule is saved: every 6 h (or the old `check_interval_hours` / `t3monitor_interval_hours`).
+- Default until a schedule is saved: every 6 h (or the old `check_interval_hours` / `t3monitor_interval_hours`); PHP version & security advisories: daily at 07:00.
 - `python3 app.py --no-watch` pauses the TYPO3 release check (shown as *paused*).
 
 ## TYPO3 status (t3monitor)

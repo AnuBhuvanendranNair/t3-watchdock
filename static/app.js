@@ -176,7 +176,9 @@ async function loadT3mSummary(pre) {
       ${x.last_error ? ` <span class="sev-2" title="${esc(x.last_error)}">⚠ last check failed</span>` : ""}`;
   };
   const ew = x => !x?.has_data ? `<span class="sub">–</span>`
-    : `<span class="badge ${x.errors ? "sev-2" : "sev0"}">${x.errors} E</span> <span class="badge ${x.warnings ? "sev-1" : "sev0"}">${x.warnings} W</span>`;
+    : `<span class="badge ${x.errors ? "sev-2" : "sev0"}">${x.errors} E</span> <span class="badge ${x.warnings ? "sev-1" : "sev0"}">${x.warnings} W</span>`
+      + (x.advisories ? ` <span class="badge sev-2" title="${x.advisories} security advisor${x.advisories === 1 ? "y" : "ies"} affect this instance">${x.advisories} SA</span>` : "")
+      + (x.php_check?.severity ? ` <span class="badge sev-${x.php_check.severity}" title="${esc(x.php_check.text)}">PHP</span>` : "");
   const rows = S.projects.map(p => {
     const s = d[p.id] || {}, a = s.production, b = s.staging;
     const diff = a?.typo3 && b?.typo3 && a.typo3 !== b.typo3;
@@ -266,6 +268,23 @@ const sevBadge = n => `<span class="badge ${Number(n) === 0 ? "sev0" : "sev-" + 
 const verCmp = (a, b) => { const x = String(a).split("."), y = String(b).split(".");
   for (let i = 0; i < 3; i++) { const d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0); if (d) return d; } return 0; };
 
+// Security section of an instance (result of the scheduled "PHP version & security advisories" task)
+function secBlock(sec) {
+  const task = S.scheduler.find(t => t.id === "security");
+  if (!sec) return `<details><summary>Security · not checked yet</summary><p class="empty">Runs with the
+    <a href="#/scheduler">${esc(task?.name || "security")}</a> task (${esc(task?.cfg.enabled === false ? "off" : task?.schedule || "–")}).</p></details>`;
+  const adv = sec.advisories || [], php = sec.php;
+  const meta = [adv.length ? `<span class="sev-2">${adv.length} advisor${adv.length === 1 ? "y" : "ies"}</span>` : "no advisories",
+    php?.severity ? `<span class="sev-${php.severity}">${esc(php.text)}</span>` : ""].filter(Boolean).join(" · ");
+  return `<details${adv.length || php?.severity ? " open" : ""}><summary>Security · ${meta}</summary>
+    <p class="sub" style="margin:0 0 8px">${php ? esc(php.text) : "PHP version unknown"} · checked ${esc(fmt(sec.checked))}</p>
+    ${adv.length ? `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Package</th><th>Installed</th><th>Advisory</th><th>Affected</th></tr></thead><tbody>
+      ${adv.map(a => `<tr><td><span class="badge ${a.severity === "low" ? "sev-1" : "sev-2"}">${esc(a.severity || "?")}</span></td><td><code>${esc(a.package)}</code></td>
+        <td>${esc(a.version)}</td><td>${/^https?:\/\//.test(a.link || "") ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ↗</a>` : esc(a.title)}${a.cve ? ` <span class="sub">${esc(a.cve)}</span>` : ""}</td>
+        <td class="sub">${esc(a.affected)}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="empty">No known security advisories for TYPO3 core and the public extensions.</p>`}</details>`;
+}
+
 async function loadT3m(p, e, refreshNow) {
   const id = "#t3m-" + e.env, box = $(id); if (!box) return;
   const url = p[e.cfg]?.url;
@@ -333,6 +352,7 @@ async function loadT3m(p, e, refreshNow) {
         <td>${!e.local && e.composer ? `<span class="tw">▸</span>` : ""}<code>${esc(k)}</code>${e.local ? ` <span class="chip">local</span>` : ""}</td>
         <td>${esc(e.title)}</td><td>${esc(e.version)}</td><td>${latestCell(e)}</td><td>${esc(e.composer)}</td></tr>`).join("")}
       </tbody></table></div></details>
+    ${secBlock(d.security)}
     <details><summary>Problems (${problems.length ? `${counts[2] || 0} error${counts[2] === 1 ? "" : "s"}, ${counts[1] || 0} warning${counts[1] === 1 ? "" : "s"}` : "none"})</summary>
       ${problems.length ? `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Area</th><th>Check</th><th>Value</th></tr></thead>
       <tbody>${problems.map(row).join("")}</tbody></table></div>` : `<p class="empty">No errors or warnings.</p>`}</details>
