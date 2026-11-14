@@ -51,18 +51,19 @@ def send_update_commands(results):
         upd = {k: e for k, e in r["data"]["extensions"].items() if e.get("update")}
         minor = {k: e for k, e in upd.items() if not e.get("major")}
         major = {k: e for k, e in upd.items() if e.get("major")}
-        cmd, skipped = update_command(p, minor)
+        cmd, skipped = update_command(p, minor) if p.get("ref") else (None, [])   # no branch: list only
         minor = {k: e for k, e in minor.items() if k not in skipped}
-        if not cmd and not major and not skipped:
+        if not minor and not major and not skipped:
             continue
         facts = [(f"Update: {e['composer'] or k}", f"{e['version']} → {e['latest']}") for k, e in sorted(minor.items())]
         facts += [(f"MAJOR (manual): {e['composer'] or k}", f"{e['version']} → {e['latest']}")
                   for k, e in sorted(major.items())]
         if skipped:
             facts.append(("Skipped (unexpected name/version, update manually)", ", ".join(skipped)))
-        intro = (f"Run in your local clone of {p['path']}. Updates {p.get('dev_ref') or 'develop'}, "
+        intro = (f"Run in your local clone of {p.get('path') or p['name']}. Updates {p.get('dev_ref') or 'develop'}, "
                  f"then merges into {p['ref']} (the push starts the {p['ref']} pipeline).") if cmd else \
-            "No update can be automated: check the updates below and update manually."
+            ("No update can be automated: check the updates below and update manually." if p.get("ref") else
+             "No git branch configured for this project: update manually.")
         notify_event(f"Extension updates: {p['name']}", intro, facts,
                      f"http://127.0.0.1:{port}/", "Open launcher", code=cmd)
         log(f"Update commands sent: {p['name']} ({len(minor)} minor/patch, {len(major)} major)")

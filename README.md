@@ -24,7 +24,8 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 - **Project list** — GitLab projects (path + branch) managed in the UI, stored in `config.json`
 - **Project form pre-fill** — new projects start with defaults (staging/production, `build:main`, TYPO3 13, `TARGET_TASK_NAME=shup01`); branch, production branch and TYPO3 major are select boxes; when GitLab is reachable, project path search plus name, branches, manual jobs (CI lint) and TYPO3 major are read from GitLab
 - **Run pipelines** — normal run or "TYPO3 update" run, each with its own CI variables
-- **Run all** — start the normal pipeline of every project at once (one confirmation, failures reported per project)
+- **Run all** — start the normal pipeline of every project with CI/CD at once (one confirmation, failures reported per project)
+- **Projects without CI/CD** — untick *Uses GitLab CI/CD* in the project form: no pipelines, no TYPO3 auto-update, no *Run all*; the project page shows only the TYPO3 status (t3monitor). Path and branch are optional; with a branch, extension update messages contain ready-to-run commands, without one they only list the updates
 - **Promote to production** — after a successful pipeline on the staging branch, start a pipeline on the production branch (see below)
 - **Job view** — pipeline status and jobs; play manual jobs with one click
 - **Auto-play** — listed manual jobs (e.g. `build:main`) are started automatically once they become playable (polled every 15 s, max. 2 h)
@@ -32,9 +33,9 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
   - First check only stores a baseline, it does not trigger
   - Failed triggers are retried on the next check
 - **Notifications (Microsoft Teams, email)** — when a pipeline started by the TYPO3 watcher has finished (success, failed, canceled, skipped), a Teams message and/or email with status and link is sent; also when the auto-trigger could not start the pipeline. The t3monitor check sends a summary per scheduled run and alerts on new findings (see below). Set up in *Settings*
-- **TYPO3 status (t3monitor)** — reads TYPO3 version, extensions and status checks from sites with the [t3monitor](https://github.com/BrainAppeal/t3monitor) extension, for the production and (optionally) the staging instance of a project; shown on the project page with a change history (see below)
+- **TYPO3 status (t3monitor)** — reads TYPO3 version, extensions and status checks from sites with the [t3monitor](https://github.com/BrainAppeal/t3monitor) extension, plus server info (PHP, database, web server, OS kernel without hostname), for the production and (optionally) the staging instance of a project; shown on the project page with a change history (see below)
 - **Extension updates & changelogs** — newest compatible release per extension from Packagist (major updates marked separately); click an extension row to read the changelog of that release
-- **TYPO3 overview on the home page** — table with TYPO3 version (↑ = update available) and errors/warnings of production and staging per project, a *versions differ* marker and the oldest last check; data from the last t3monitor check
+- **TYPO3 overview on the home page** — table with TYPO3 version (↑ = update available), PHP / database / web server versions and errors/warnings of production and staging per project, *versions differ* / *PHP differs* markers and the oldest last check; data from the last t3monitor check
 - **Scheduler** — page to set when the TYPO3 release check and the t3monitor check run: every N hours or daily at a fixed time on chosen weekdays; shows last run, result and next run, with *Run now*
 - **Run history & log** — kept in `state.json` (last 100 runs, 200 log entries)
 - **Save & close** — Scheduler and Settings forms have *Save* (stay on the page) and *Save & close* (back to Projects)
@@ -81,8 +82,9 @@ python3 app.py --no-watch    # TYPO3 release check paused (Scheduler)
 | `projects[].id` | Stable ID, generated from `path` + `ref` |
 | `projects[].name` | Display name |
 | `projects[].gitlab_url` | GitLab base URL |
-| `projects[].path` | Project path, e.g. `group/project` |
-| `projects[].ref` | Branch to run the pipeline on |
+| `projects[].ci` | `false` = project without GitLab CI/CD (monitoring only); missing = `true` |
+| `projects[].path` | Project path, e.g. `group/project` (optional when `ci` is `false`) |
+| `projects[].ref` | Branch to run the pipeline on (optional when `ci` is `false`; used for update commands) |
 | `projects[].variables` | CI variables for a normal run |
 | `projects[].auto_play` | Manual jobs to auto-play after a normal run |
 | `projects[].auto_typo3.enabled` | Enable TYPO3 auto-trigger for this project |
@@ -126,7 +128,7 @@ Page *Scheduler* (top menu) lists the automatic tasks:
 3. The project page shows one collapsible section per instance (*TYPO3 status – Production*, *TYPO3 status – Staging*). Closed, its header shows TYPO3 version, ↑ core update, errors, warnings, extension updates and the last check. Open: status boxes, then the collapsible lists *Extensions*, *Problems* (errors and warnings), *All status checks* and *History*. **↻ Refresh now** fetches immediately; otherwise on the schedule of the *t3monitor check* task in *Scheduler*.
 4. The home page shows all projects in one table (production and staging side by side).
 
-- Request: `?t3monitor=1&secret=<first 32 chars of the key>`; the answer is AES-encrypted with the last 32 chars (never sent), decrypted with `openssl`.
+- Request: `?t3monitor=1&secret=<first 32 chars of the key>&reports=internal,security,installed_extensions,system`; the answer is AES-encrypted with the last 32 chars (never sent), decrypted with `openssl`.
 - Only technical data is stored (version, extensions, status checks) — no backend users or paths.
 - **Extension updates:** for every public extension the newest stable release on [Packagist](https://packagist.org) whose `typo3/cms-core` requirement fits the site's TYPO3 version is looked up (column *Latest*). Rows with an update are tinted; major updates (e.g. 7.x → 8.0, may contain breaking changes) get an amber tint and a *major* chip. Counts appear in the section header and the *Extensions* box. Local extensions are skipped; packages not on Packagist show *not on Packagist*. Package lists are cached for 1 h; if Packagist is unreachable the t3monitor check still succeeds (*unknown*).
 - **Changelog:** click an extension row to show the changelog of the latest version (when an update is available) or of the installed version. Sources in this order: GitHub/GitLab release notes of the tag, then the changelog file at the tag (`CHANGELOG.md`, `ChangeLog`, … — the section of that version, or the per-version file it links to). Links to the source, the full compare view (installed → latest) and the repository. Only packages hosted on github.com or gitlab.com; results are cached until restart.

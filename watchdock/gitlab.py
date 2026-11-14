@@ -98,7 +98,13 @@ def auto_play(project, pipeline_id, job_names, timeout=7200):
         log(f"Auto-play: not started in pipeline #{pipeline_id}: {', '.join(sorted(names))}")
 
 
+def require_ci(project):
+    if project.get("ci") is False:
+        raise RuntimeError(f"CI/CD is off for {project.get('name') or project['id']}: no pipelines")
+
+
 def run_pipeline(project, variables, trigger, play_jobs=(), ref=None):
+    require_ci(project)
     ref = ref or project["ref"]
     body = {"ref": ref,
             "variables": [{"key": k, "value": str(v)} for k, v in variables.items()]}
@@ -173,6 +179,7 @@ def project_info(gitlab_url, path, ref=""):
 
 def promote(project, source_id):
     """Run the production pipeline, only after a successful staging pipeline."""
+    require_ci(project)
     prod = project.get("production") or {}
     if not prod.get("ref"):
         raise RuntimeError("No production branch configured for this project")

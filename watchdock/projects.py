@@ -1,4 +1,6 @@
 """Create / update project entries in config.json."""
+import re
+
 from .core import CONFIG, STATE, config, load, lock, log, save
 from .t3monitor import T3M_ENVS, _t3m_url, _t3m_user, save_t3m_key
 
@@ -12,18 +14,27 @@ def _jobs(v):
 def build_project(b, pid=None):
     path = (b.get("path") or "").strip().strip("/")
     ref = (b.get("ref") or "").strip()
-    if not path or not ref:
+    name = (b.get("name") or "").strip()
+    ci = b.get("ci", True) is not False          # False = no GitLab CI/CD: monitoring (t3monitor) only
+    if ci and (not path or not ref):
         raise RuntimeError("Path and branch are required")
+    if not ci and not (name or path):
+        raise RuntimeError("Name or project path is required")
+    if not pid:
+        pid = (path + "-" + ref).replace("/", "-") if path and ref else re.sub(r"[^a-z0-9]+", "-", (name or path).lower()).strip("-")
+        if not pid:
+            raise RuntimeError("Name must contain letters or digits")
     return {
-        "id": pid or (path + "-" + ref).replace("/", "-"),
-        "name": (b.get("name") or "").strip() or path,
+        "id": pid,
+        "name": name or path,
+        "ci": ci,
         "gitlab_url": (b.get("gitlab_url") or "https://gitlab.gingco.de").strip().rstrip("/"),
         "path": path,
         "ref": ref,
         "variables": b.get("variables") or {},
         "auto_play": _jobs(b.get("auto_play")),
         "auto_typo3": {
-            "enabled": bool(b.get("auto_enabled")),
+            "enabled": ci and bool(b.get("auto_enabled")),
             "major": int(b.get("major") or 13),
             "variables": b.get("auto_variables") or {},
             "auto_play": _jobs(b.get("auto_typo3_play"))},
