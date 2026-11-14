@@ -1,4 +1,4 @@
-# Plan: Login, Database Storage, GitLab Token Encryption - Gingco Communication - Version: 01 - 11 2026
+# Plan: Login, Database Storage, GitLab Token Encryption - Gingco Communication - Version: 02 - 11 2026
 
 Status: analysis only, nothing implemented yet.
 
@@ -13,6 +13,8 @@ Status: analysis only, nothing implemented yet.
 - No automated tests in the repository.
 
 ## 2. Login
+
+Note: the production decision (section 7) may move the login to the reverse proxy. Decide that first; the approach below applies only to a login inside the app.
 
 Open decisions:
 
@@ -67,6 +69,10 @@ Recommendation: option 1 + option 3. Option 2 only if blocked automatic runs aft
 
 ## 5. Validation
 
+- [x] Scheduler and watcher threads run inside the web server process — BELEGT (`watchdock/server.py` `main()`)
+- [x] Pipelines run as the token owner — BELEGT (`PRIVATE-TOKEN` header in `watchdock/gitlab.py`)
+- [x] Python docs: `http.server` is not recommended for production — BELEGT (Python documentation)
+
 - [x] All storage goes through `load` / `save` / secret helpers — BELEGT (grep, ~45 call sites)
 - [x] SQLite needs no third-party package — BELEGT (`sqlite3` is stdlib)
 - [x] No tests in the repository — BELEGT (`git ls-files`)
@@ -78,11 +84,34 @@ Recommendation: option 1 + option 3. Option 2 only if blocked automatic runs aft
 
 ## 6. Next steps (when started)
 
+0. Decide the open points of section 7 (login location, third-party packages).
 1. Decide the login open points (section 2) and the encryption option (section 4).
 2. Database layer + import script for existing files.
 3. Login and sessions on top of the database.
 4. Encrypted secrets storage.
 5. Manual test of all features, README update.
+6. Production setup (section 7): reverse proxy, login, production app server.
+
+## 7. Production deployment (decision 14.11.2026)
+
+Decision: before the launcher runs as a shared server, it gets the standard production setup, in this order:
+
+1. **Reverse proxy** (Traefik, already used for other projects): the only part reachable from the network. HTTPS, timeouts, request size limits, rate limiting. The app itself stays on `127.0.0.1` or an internal Docker network.
+2. **Login**: no access without signing in.
+3. **Production app server**: the app as a WSGI/ASGI app (Flask or FastAPI) under Gunicorn or Uvicorn, instead of Python's `http.server`.
+
+Constraints:
+
+- Scheduler and watcher run as threads inside the server process. The app server must run exactly one worker, or the scheduler moves into its own process; otherwise pipelines and messages run twice.
+- JSON files with an in-process lock are not safe with several processes. The database (section 3) comes before more than one process.
+- Pipelines run as the token owner. A shared server needs one GitLab token per user, or GitLab login with API access on the user's behalf, so the GitLab audit log shows who started what.
+
+Open decisions:
+
+- Login location: at the proxy (oauth2-proxy with GitLab as login provider, no own user database) or inside the app (section 2). This changes the `users` / `sessions` tables in section 3.
+- Step 3 needs third-party packages (Flask/FastAPI, Gunicorn/Uvicorn). This ends the "stdlib only" rule (also relevant for section 4).
+
+Until this is done: each person runs a local instance with their own GitLab token; nothing is exposed beyond localhost.
 
 ---
 
