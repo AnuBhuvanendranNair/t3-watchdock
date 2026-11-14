@@ -279,6 +279,7 @@ def t3m_view(pid, env="production"):
     return {"env": env, "key_set": bool(t3m_key(pid, env)), "last_check": h.get("last_check"), "last_error": h.get("last_error"),
             "current": snaps[0]["data"] if snaps else None,
             "since": snaps[0]["t"] if snaps else None,
+            "security": {k: v for k, v in (h.get("security") or {}).items() if k != "reported"} or None,
             "history": [{"t": x["t"], "last": x["last"], "changes": x["changes"],
                          "typo3": x["data"].get("typo3")} for x in snaps]}
 
@@ -297,6 +298,8 @@ def t3m_summary():
             out.setdefault(p["id"], {})[env] = {
                 "typo3": c.get("typo3"), **{k: c.get(k) for k in T3M_SERVER}, "errors": sev.count(2), "warnings": sev.count(1), "has_data": bool(c),
                 "ext_updates": len(upd), "ext_major": sum(1 for x in upd if x.get("major")),
+                "advisories": len((h.get("security") or {}).get("advisories") or []),
+                "php_check": (h.get("security") or {}).get("php"),
                 "last_check": h.get("last_check"), "last_error": h.get("last_error")}
     return out
 
