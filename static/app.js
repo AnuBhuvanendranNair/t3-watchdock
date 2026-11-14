@@ -53,6 +53,25 @@ function setStyle(id, save) {
 setStyle(document.documentElement.dataset.style || "default");
 $("#styleSel").onchange = ev => setStyle(ev.target.value, true);
 
+// GitHub-style confirmation for destructive actions: the button is enabled only once the exact name is typed.
+// Resolves true (confirmed) or false (cancelled / Escape).
+function confirmByName(title, bodyHtml, name, action) {
+  return new Promise(resolve => {
+    const d = document.createElement("dialog");
+    d.className = "confirm-dlg";
+    d.innerHTML = `<form method="dialog"><h2>${esc(title)}</h2>${bodyHtml}
+      <label>To confirm, type <b>${esc(name)}</b> below:</label>
+      <input autocomplete="off" spellcheck="false" aria-label="Project name">
+      <div class="actions"><button type="button" class="btn sec">Cancel</button>
+        <button class="btn danger" value="ok" disabled>${esc(action)}</button></div></form>`;
+    const inp = d.querySelector("input"), ok = d.querySelector('[value="ok"]');
+    inp.oninput = () => ok.disabled = inp.value.trim() !== name;
+    d.querySelector(".btn.sec").onclick = () => d.close();
+    d.onclose = () => { resolve(d.returnValue === "ok" && inp.value.trim() === name); d.remove(); };
+    document.body.append(d); d.showModal(); inp.focus();
+  });
+}
+
 async function refresh() {
   S = await api("/api/state");
   const pill = $("#tokenPill");
@@ -675,8 +694,12 @@ const actions = {
   },
   async del() {
     const p = proj($("#view").dataset.project);
-    if (!confirm(`Remove ${p.name} from the launcher?`)) return;
-    try { await api("/api/projects/delete", {id:p.id}); await refresh(); toast("Project removed"); location.hash = "#/"; }
+    const name = p.name || p.id;
+    if (!await confirmByName(`Remove ${name}?`,
+      `<p>This removes the project from the launcher, including its stored t3monitor keys and Basic-auth passwords
+       (production and staging). <b>This cannot be undone.</b> GitLab and the website itself are not touched.</p>`,
+      name, "Remove this project")) return;
+    try { await api("/api/projects/delete", {id:p.id, confirm:name}); await refresh(); toast("Project removed"); location.hash = "#/"; }
     catch (e) { toast(e.message, true); }
   },
   async check(el) {

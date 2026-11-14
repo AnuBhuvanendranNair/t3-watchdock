@@ -182,6 +182,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/projects/delete":
                 with lock:
                     cfg = config()
+                    proj = next((p for p in cfg["projects"] if p["id"] == body.get("id")), None)
+                    if not proj:
+                        raise RuntimeError("Project not found")
+                    if (body.get("confirm") or "").strip() != (proj.get("name") or proj["id"]):
+                        raise RuntimeError("Confirmation does not match the project name")
                     cfg["projects"] = [p for p in cfg["projects"] if p["id"] != body["id"]]
                     save(CONFIG, cfg)
                 for env in T3M_ENVS:
