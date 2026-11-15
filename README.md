@@ -136,7 +136,7 @@ Page *Scheduler* (top menu) lists the automatic tasks:
 - **Extension updates:** for every public extension the newest stable release on [Packagist](https://packagist.org) whose `typo3/cms-core` requirement fits the site's TYPO3 version is looked up (column *Latest*). Rows with an update are tinted; major updates (e.g. 7.x → 8.0, may contain breaking changes) get an amber tint and a *major* chip. Counts appear in the section header and the *Extensions* box. Local extensions are skipped; packages not on Packagist show *not on Packagist*. Package lists are cached for 1 h; if Packagist is unreachable the t3monitor check still succeeds (*unknown*).
 - **Changelog:** click an extension row to show the changelog of the latest version (when an update is available) or of the installed version. Sources in this order: GitHub/GitLab release notes of the tag, then the changelog file at the tag (`CHANGELOG.md`, `ChangeLog`, … — the section of that version, or the per-version file it links to). Links to the source, the full compare view (installed → latest) and the repository. Only packages hosted on github.com or gitlab.com; results are cached until restart.
 - History in `t3monitor/<project-id>.json` (production) and `t3monitor/staging/<project-id>.json` (staging): a new entry only when something changes (TYPO3 version, extension added/removed/updated, status severity); otherwise "seen until" is updated. Last 300 changes are kept.
-- Key file: mode `600`, never sent to the browser, removed with the project.
+- Key file: mode `600`, removed with the project. The edit form can reveal an individual saved key on demand over same-origin HTTPS or localhost.
 - Password-protected site (HTTP Basic auth): set *Basic auth user* and *password* in the project's t3monitor settings. The user is stored in `config.json`, the password in `<project-id>.t3monitor-auth` (mode `600`, never sent to the browser). Empty user = no basic auth.
 
 ## Notifications (Microsoft Teams, email)
@@ -226,7 +226,7 @@ Notes:
 - Optional HTTPS with a local mkcert certificate
 - `Host` header check against DNS rebinding
 - `Origin` check and `application/json` requirement on POST against cross-site requests
-- Secrets (GitLab token, Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`, read server-side only and never sent to the browser
+- Secrets (GitLab token, Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form
 - Token, secrets, config, state, t3monitor history and logs are gitignored
 - Outgoing connections: GitLab (only to the GitLab URLs of configured projects), `get.typo3.org`, the Teams webhook / SMTP server if enabled, the t3monitor site URLs, `repo.packagist.org` (only public Composer package names are sent), and — when a changelog is opened — `api.github.com`, `raw.githubusercontent.com` or `gitlab.com` (public repository paths and tags only)
 

@@ -147,6 +147,18 @@ class Handler(BaseHTTPRequestHandler):
                 TOKEN_FILE.unlink(missing_ok=True)
                 log("GitLab token removed from app folder")
                 return self._send(200, {"ok": True})
+            if path == "/api/t3monitor/reveal-key":
+                host = self.headers.get("Host", "")
+                secure = isinstance(self.connection, ssl.SSLSocket)
+                loopback = host.split(":", 1)[0] in {"127.0.0.1", "localhost"}
+                origin = ("https://" if secure else "http://") + host
+                if not (secure or loopback) or self.headers.get("Origin") != origin:
+                    return self._send(403, {"error": "Reveal requires a same-origin HTTPS or localhost request"})
+                p = find_project(body["project"])
+                key = t3m_key(p["id"], body["env"])
+                if not key:
+                    return self._send(404, {"error": "No saved key for this environment"})
+                return self._send(200, {"key": key})
             if path == "/api/t3monitor/refresh":
                 p, env = find_project(body["project"]), body.get("env") or "production"
                 t3m_env(env)

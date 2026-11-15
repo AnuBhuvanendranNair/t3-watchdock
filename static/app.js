@@ -594,34 +594,45 @@ const t3mOn = (p, e) => !!(p[e.cfg]?.url && S[e.keys]?.includes(p.id));
 
 function t3mFields(e, p) {
   const c = (p || {})[e.cfg] || {}, hasKey = p && S[e.keys]?.includes(p.id), hasAuth = p && S[e.auth]?.includes(p.id);
-  return `<div class="card"><div class="sec-title">t3monitor – ${esc(e.label)}</div><div class="fields">
-        <div><label>Site URL</label><input name="${e.f}url" value="${esc(c.url)}" placeholder="${esc(e.ph)}">
+  return `<section class="card monitor-form"><div class="monitor-form-heading"><h3 class="sec-title">${esc(e.label)}</h3><span class="focus-monitor ${hasKey ? "is-configured" : "is-pending"}">${hasKey ? "Key saved" : "Key missing"}</span></div><div class="monitor-fields">
+        <div><label for="${e.f}url">Site URL</label><input id="${e.f}url" name="${e.f}url" value="${esc(c.url)}" placeholder="${esc(e.ph)}">
           <div class="hint">${esc(e.hint)}</div></div>
-        <div><label>t3monitor key (64 characters)</label><input name="${e.f}key" type="password" autocomplete="new-password"
-          placeholder="${hasKey ? "stored – leave empty to keep" : "not stored"}">
-          <div class="hint">Extension configuration → t3monitor → encryption_key. Stored server-side only.</div>
-          <button type="button" class="btn sec sm" data-gen="${e.f}key" style="margin-top:6px">Generate key</button>
-          <button type="button" class="btn sec sm" data-copy="${e.f}key" style="margin-top:6px">Copy</button>
-          <div class="hint" data-genhint="${e.f}key" style="display:none">Generated locally. Copy this value into the ${esc(e.label.toLowerCase())} site’s t3monitor <b>encryption_key</b>, then Save changes. Must match on both sides.</div>
-          ${hasKey ? `<label class="check" style="margin-top:6px"><input type="checkbox" name="${e.f}key_clear"> Remove stored key</label>` : ""}</div>
+        ${hasKey ? `<div class="monitor-saved-key">
+          <div class="actions">
+            <button type="button" class="btn sec sm" data-reveal="${e.f}key" data-saved-env="${esc(e.env)}" aria-controls="${e.f}saved-key" aria-expanded="false">Reveal saved key</button>
+            <button type="button" class="btn sec sm" data-copy="${e.f}key" data-saved-copy hidden>Copy saved key</button>
+          </div>
+          <input id="${e.f}saved-key" type="text" aria-label="Saved ${esc(e.label)} key" readonly hidden spellcheck="false" autocomplete="off">
+        </div>` : ""}
+        <details class="monitor-key-field"${hasKey ? "" : " open"}>
+          <summary>${hasKey ? "Replace key" : "Set up key"}</summary>
+          <label for="${e.f}key">t3monitor key (64 characters)</label><input id="${e.f}key" name="${e.f}key" type="password" autocomplete="new-password" spellcheck="false" minlength="64" maxlength="64" pattern="[^\\s]{64}"
+          title="Enter 64 characters without spaces" placeholder="64 characters">
+          <div class="hint">Extension configuration → t3monitor → encryption_key.</div>
+          <div class="actions monitor-key-actions">
+            <button type="button" class="btn sec sm" data-gen="${e.f}key">Generate key</button>
+            <button type="button" class="btn sec sm" data-reveal="${e.f}key" aria-controls="${e.f}key">Reveal</button>
+            <button type="button" class="btn sec sm" data-copy="${e.f}key">Copy</button>
+          </div>
+          <p class="hint" data-key-draft="${e.f}key" hidden>Unsaved key. Set the same key on the ${esc(e.label.toLowerCase())} site before saving.</p>
+          ${hasKey ? `<label class="check" style="margin-top:6px"><input type="checkbox" name="${e.f}key_clear"> Remove stored key</label>` : ""}</details>
+        <details class="monitor-auth"${hasAuth || c.auth_user ? " open" : ""}><summary>Site authentication</summary>
         <div><label>Basic auth user (optional)</label><input name="${e.f}auth_user" value="${esc(c.auth_user)}" autocomplete="off" placeholder="only if the site is password-protected">
           <div class="hint" data-secondary-copy>Empty = no basic auth.</div></div>
         <div><label>Basic auth password</label><input name="${e.f}auth_password" type="password" autocomplete="new-password"
           placeholder="${hasAuth ? "stored – leave empty to keep" : "not stored"}">
           ${hasAuth ? `<label class="check" style="margin-top:6px"><input type="checkbox" name="${e.f}auth_clear"> Remove stored password</label>` : ""}</div>
-      </div></div>`;
+        </details>
+      </div></section>`;
 }
 
 function viewForm(p) {
   const v = p || DEFAULTS, a = v.auto_typo3 || DEFAULTS.auto_typo3;
   $("#view").innerHTML = `
     <div class="crumb"><a href="#/">Projects</a> / ${p ? `<a href="${pUrl(p)}">${esc(p.name)}</a> / Edit` : "New project"}</div>
-    <div class="head"><h1>${p ? "Edit project" : "New project"}</h1></div>
+    <div class="head"><h1>${p ? "Edit " + esc(p.name) : "New project"}</h1></div>
     <form id="pform" class="stack">
       <div class="card"><div class="sec-title">Basics</div>
-        <label class="check" style="margin-bottom:12px"><input type="checkbox" name="ci" ${v.ci !== false ? "checked" : ""}> Uses GitLab CI/CD (pipelines)</label>
-        <div class="hint" data-noci style="margin:-6px 0 12px">Off = TYPO3 monitoring only: no pipelines, no TYPO3 auto-update. Path and branch are optional
-          (with a branch, extension update messages contain ready-to-run git/composer commands).</div>
         <div class="fields">
         <div><label>Name<span data-noci> *</span></label><input name="name" value="${esc(p?.name)}" placeholder="WVG Online"></div>
         <div><label>GitLab URL</label><input name="gitlab_url" value="${esc(v.gitlab_url || DEFAULTS.gitlab_url)}"></div>
@@ -630,6 +641,15 @@ function viewForm(p) {
         <datalist id="projlist"></datalist>
         <div><label>Branch<span data-ci> *</span></label><select name="ref" required>${branchOpts([], v.ref, true, "– none –")}</select></div>
       </div></div>
+      <section class="project-monitoring" aria-labelledby="project-monitoring-title">
+        <h2 id="project-monitoring-title">TYPO3 monitoring</h2>
+        <div class="project-monitoring-grid">${T3M_ENVS.map(e => t3mFields(e, p)).join("")}</div>
+      </section>
+      <div class="card"><h2 class="sec-title">GitLab pipelines</h2>
+        <label class="check" style="margin-bottom:12px"><input type="checkbox" name="ci" ${v.ci !== false ? "checked" : ""}> Uses GitLab CI/CD (pipelines)</label>
+        <div class="hint" data-noci style="margin:-6px 0 12px">Off = TYPO3 monitoring only: no pipelines, no TYPO3 auto-update. Path and branch are optional
+          (with a branch, extension update messages contain ready-to-run git/composer commands).</div>
+      </div>
       <div class="card" data-ci><div class="sec-title">Run pipeline</div><div class="fields">
         <div><label>Variables</label><input name="variables" value="${esc(varsStr(v.variables))}" placeholder="KEY=VALUE, KEY2=VALUE2"></div>
         <div><label>Auto-play manual jobs</label><input name="auto_play" value="${esc((v.auto_play || []).join(", "))}" placeholder="build:main">
@@ -650,8 +670,7 @@ function viewForm(p) {
         <div><label>Auto-play manual jobs</label><input name="prod_play" value="${esc((v.production ? v.production.auto_play || [] : v.auto_play || []).join(", "))}">
           <div class="hint" data-secondary-copy>Pre-filled from the jobs above; edit to differ.</div></div>
       </div></div>
-      ${T3M_ENVS.map(e => t3mFields(e, p)).join("")}
-      <div class="actions"><button class="btn" type="submit">${p ? "Save changes" : "Create project"}</button>
+      <div class="actions project-form-actions"><span class="sub" role="status" data-form-dirty hidden>Unsaved changes</span><button class="btn" type="submit">${p ? "Save changes" : "Create project"}</button>
         <a class="btn sec" href="${p ? pUrl(p) : "#/"}">Cancel</a></div>
     </form>`;
   const fm = $("#pform"), E = fm.elements, sp = E.auto_play, pp = E.prod_play;
@@ -662,34 +681,72 @@ function viewForm(p) {
     E.path.required = E.ref.required = on; E.name.required = !on;
   };
   E.ci.addEventListener("change", syncCI); syncCI();
-  // Generate a 64-char t3monitor key locally (32 random bytes → hex). Fills + reveals the field for copying.
+  fm.addEventListener("invalid", ({target}) => {
+    const details = target.closest("details");
+    if (details) details.open = true;
+  }, true);
+  // Generate a 64-char t3monitor key locally (32 random bytes → hex).
   // Non-destructive: nothing is stored until "Save changes"; the SAME value must be set as the site's encryption_key.
-  fm.addEventListener("click", ev => {
-    const b = ev.target.closest("[data-gen]"); if (!b) return;
-    ev.preventDefault();
-    const inp = E[b.dataset.gen];
+  fm.addEventListener("click", async ev => {
+    const b = ev.target.closest("[data-gen], [data-reveal]"); if (!b) return;
+    const name = b.dataset.gen || b.dataset.reveal, inp = E[name];
+    if (b.dataset.savedEnv) {
+      const saved = fm.querySelector(`#${name.replace(/key$/, "saved-key")}`);
+      const copy = fm.querySelector(`[data-saved-copy][data-copy="${name}"]`);
+      if (!saved.hidden) {
+        saved.hidden = copy.hidden = true;
+        saved.value = "";
+        b.textContent = "Reveal saved key";
+        b.setAttribute("aria-expanded", "false");
+        return;
+      }
+      b.disabled = true;
+      try {
+        const {key} = await api("/api/t3monitor/reveal-key", {project:p.id, env:b.dataset.savedEnv});
+        if (!fm.isConnected) return;
+        saved.value = key;
+        saved.hidden = copy.hidden = false;
+        b.textContent = "Hide saved key";
+        b.setAttribute("aria-expanded", "true");
+      } catch (e) { toast(e.message, true); }
+      finally { b.disabled = false; }
+      return;
+    }
+    if (b.dataset.reveal) {
+      if (!inp.value) { toast("Generate or enter a key first", true); return; }
+      inp.type = inp.type === "password" ? "text" : "password";
+      b.textContent = inp.type === "text" ? "Hide" : "Reveal";
+      return;
+    }
     inp.value = [...crypto.getRandomValues(new Uint8Array(32))].map(x => x.toString(16).padStart(2, "0")).join("");
-    inp.type = "text"; inp.focus(); inp.select();
-    const h = fm.querySelector(`[data-genhint="${b.dataset.gen}"]`); if (h) h.style.display = "";
-    toast("Key generated — copy it into the site’s t3monitor encryption_key, then Save changes");
+    inp.type = "password";
+    fm.querySelector(`[data-reveal="${name}"]:not([data-saved-env])`).textContent = "Reveal";
+    inp.dispatchEvent(new Event("input", {bubbles:true}));
   });
   // Copy the current key field value to the clipboard (clipboard API, with a legacy fallback for insecure contexts).
   fm.addEventListener("click", async ev => {
     const b = ev.target.closest("[data-copy]"); if (!b) return;
     ev.preventDefault();
-    const inp = E[b.dataset.copy], val = (inp.value || "").trim();
+    const saved = fm.querySelector(`#${b.dataset.copy.replace(/key$/, "saved-key")}`);
+    const inp = b.hasAttribute("data-saved-copy") ? saved : E[b.dataset.copy], val = inp.value.trim();
     if (!val) { toast("Nothing to copy — generate or enter a key first", true); return; }
-    const was = inp.type; inp.type = "text";
     try {
       if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(val);
-      else { inp.focus(); inp.select(); document.execCommand("copy"); }
+      else {
+        inp.focus(); inp.select();
+        if (!document.execCommand("copy")) throw new Error("Clipboard unavailable");
+      }
       toast("Key copied to clipboard");
-    } catch (e) { inp.focus(); inp.select(); toast("Copy failed — select and copy manually (Cmd/Ctrl+C)", true); }
-    if (was === "password") inp.type = "password";
+    } catch (e) { toast("Copy failed. Reveal the key to copy it manually.", true); }
   });
   // Pre-fill from GitLab: only fields the user has not typed in; when editing, only empty ones.
   const touched = new Set();
-  fm.addEventListener("input", ev => touched.add(ev.target.name));
+  fm.addEventListener("input", ({target}) => {
+    touched.add(target.name);
+    fm.querySelector("[data-form-dirty]").hidden = false;
+    const draft = fm.querySelector(`[data-key-draft="${target.name}"]`);
+    if (draft) draft.hidden = !target.value;
+  });
   const fill = (name, val) => {
     const el = E[name];
     if (val == null || val === "" || touched.has(name) || (p && el.value.trim())) return;
