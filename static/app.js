@@ -46,13 +46,16 @@ $("#themeBtn").onclick = () => {
   setTheme(THEMES[(THEMES.findIndex(x => x.id === cur) + 1) % THEMES.length].id, true);
 };
 
-// Style selector next to the theme switch: Default, Terminal or Turbo C++; saved per browser
-const STYLES = ["default", "terminal", "turbo"];
+// Style selector next to the theme switch; saved per browser
+const STYLES = ["default", "focus", "terminal", "turbo"];
+const focusAvatars = new Map();
 function setStyle(id, save) {
   const root = document.documentElement, st = STYLES.includes(id) ? id : "default";
   if (st === "default") delete root.dataset.style; else root.dataset.style = st;
   if (save) try { st === "default" ? localStorage.removeItem("style") : localStorage.setItem("style", st); } catch (e) {}
   $("#styleSel").value = root.dataset.style || "default";
+  updateOverviewOrder();
+  if (st === "focus") loadFocusAvatars();
 }
 setStyle(document.documentElement.dataset.style || "default");
 $("#styleSel").onchange = ev => setStyle(ev.target.value, true);
@@ -104,10 +107,41 @@ async function render() {
 }
 
 /* ---------------- views ---------------- */
+function loadFocusAvatars() {
+  document.querySelectorAll(".focus-avatar").forEach(badge => {
+    const {project, gitlab} = badge.dataset;
+    if (badge.querySelector("img")) return;
+    if (!focusAvatars.has(project)) {
+      focusAvatars.set(project, api(`/api/project-avatar?project=${encodeURIComponent(project)}`)
+        .then(({url}) => {
+          if (!url) return null;
+          const base = new URL(gitlab), avatar = new URL(url, base);
+          return avatar.protocol === "https:" && avatar.origin === base.origin && !avatar.username && !avatar.password
+            ? avatar.href : null;
+        }).catch(() => null));
+    }
+    focusAvatars.get(project).then(url => {
+      if (!url || !badge.isConnected || badge.querySelector("img")) return;
+      const image = new Image();
+      image.alt = "";
+      image.referrerPolicy = "no-referrer";
+      image.onload = () => { if (!badge.querySelector("img")) badge.append(image); };
+      image.src = url;
+    });
+  });
+}
+
 function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload needed
+  const projectsWithRuns = new Set(S.projects_with_runs || []);
   const cards = S.projects.map(p => {
     const last = S.runs.find(r => r.project === p.id);
     const a = p.auto_typo3 || {};
+    const monitoring = T3M_ENVS.filter(e => p[e.cfg]?.url).map(e => {
+      const ready = t3mOn(p, e);
+      return `<span class="focus-monitor ${ready ? "is-configured" : "is-pending"}">
+        ${esc(e.label)}${ready ? "" : " · Key missing"}
+      </span>`;
+    }).join("");
     return `<a class="pcard" href="${pUrl(p)}">
       <div class="name">${esc(p.name)}</div>
       <div class="sub">${esc(p.path || "–")}</div>
@@ -120,15 +154,30 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
       </div>
       <div class="srvline" data-srv="${esc(p.id)}"></div>
       <div class="last">${!hasCI(p) ? "Monitoring only" : last ? `Last run: #${esc(last.pipeline)} · ${esc(fmt(last.t))} · ${esc(last.trigger)}` : "No runs yet"}</div>
-    </a>`;
+    </a>
+    <article class="pcard focus-project">
+      <a class="focus-project-link name" href="${pUrl(p)}">
+        ${projectsWithRuns.has(p.id) ? `<span class="focus-avatar" data-project="${esc(p.id)}" data-gitlab="${esc(p.gitlab_url)}" aria-hidden="true">${esc(p.name.trim().split(/\s+/u, 2).map(word => Array.from(word)[0] || "").join("").toLocaleUpperCase())}</span>` : ""}
+        <span class="focus-project-name">${esc(p.name)}</span><span class="focus-project-arrow" aria-hidden="true">›</span>
+      </a>
+      <div class="focus-monitoring" role="group" aria-label="TYPO3 monitoring">
+        ${monitoring || `<span class="focus-monitor">Monitoring not configured</span>`}
+      </div>
+      <div class="focus-project-run" role="group" aria-label="GitLab CI/CD">
+        ${!hasCI(p) ? `<span class="focus-monitor focus-ci is-disabled">CI/CD · Disabled</span>` : last
+          ? `<a class="focus-monitor focus-ci is-configured" href="${pUrl(p)}/pl/${Number(last.pipeline)}" aria-label="Open latest CI/CD run #${esc(last.pipeline)}">CI/CD · #${esc(last.pipeline)}</a>`
+          : `<span class="focus-monitor focus-ci is-pending">CI/CD · No runs yet</span>`}
+      </div>
+    </article>`;
   }).join("");
   $("#view").innerHTML = `
-    <div class="head"><div><h1>Projects</h1><div class="sub">${S.projects.length} project(s) · <span class="srvlegend"><span class="upd">↑</span> TYPO3 update available · <span class="diff">≠</span> staging differs from production</span></div></div>
+    <div class="head"><div><h1>Projects</h1><div class="sub" data-secondary-copy>${S.projects.length} project(s) · <span class="srvlegend"><span class="upd">↑</span> TYPO3 update available · <span class="diff">≠</span> staging differs from production</span></div></div>
       <div class="actions">
         ${S.projects.some(hasCI) ? `<button class="btn" data-act="runall">▶ Run all</button>` : ""}
         <a class="btn sec" href="#/new">+ New project</a></div></div>
     ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">No projects yet. <a href="#/new">Create one</a>.</div>`}
     ${S.projects.length ? `<div class="card full" id="t3sum" style="margin-top:18px"><h2>TYPO3 status – Production &amp; Staging</h2><p class="empty">Loading…</p></div>` : ""}`;
+  if (document.documentElement.dataset.style === "focus") loadFocusAvatars();
   if (!S.projects.length) return;
   if (!T3SUM) return loadT3mSummary();               // first visit: fetch once
   loadT3mSummary(T3SUM);                             // cached data at once (synchronous, no flash) ...
@@ -141,6 +190,7 @@ const extUpdTitle = x => x?.ext_updates ? `${x.ext_updates} extension update${x.
 
 // Overview table on the home page: TYPO3 version + errors/warnings per instance (data from the last t3monitor check)
 let T3SUM = null;                  // last /api/t3monitor/summary response (reused on re-render: no "Loading…" flash)
+const overviewOptions = {sort:"original"};
 async function loadT3mSummary(pre) {
   let d;
   try { d = pre ?? await api("/api/t3monitor/summary"); T3SUM = d; }
@@ -151,12 +201,12 @@ async function loadT3mSummary(pre) {
     const s = d[el.dataset.srv] || {}, a = s.production?.has_data ? s.production : null;
     const envs = [["PROD", "prod", s.production], ["STG", "stg", s.staging]].filter(([, , x]) => x?.has_data);
     if (!envs.length) return;
-    const cell = (x, k, txt, full) => {
+    const cell = (x, k, txt, full, suffix = "") => {
       const diff = a && x !== a && a[k] && x[k] && a[k] !== x[k];
-      return `<span class="${diff ? "diff" : ""}" title="${esc(full || x[k] || "")}${diff ? ` (production: ${esc(a[k])})` : ""}">${diff ? "≠ " : ""}${esc(txt || "–")}</span>`;
+      return `<span class="${diff ? "diff" : ""}" title="${esc(full || x[k] || "")}${diff ? ` (production: ${esc(a[k])})` : ""}">${diff ? "≠ " : ""}${esc(txt || "–")}${suffix}</span>`;
     };
     const t3 = x => { const latest = S.typo3_latest[String(x.typo3 || "").split(".")[0]];
-      return cell(x, "typo3", x.typo3) + (latest && x.typo3 && verCmp(latest, x.typo3) > 0 ? ` <span class="upd" title="Update available: ${esc(latest)}">↑</span>` : ""); };
+      return cell(x, "typo3", x.typo3, "", latest && x.typo3 && verCmp(latest, x.typo3) > 0 ? ` <span class="upd" title="Update available: ${esc(latest)}">↑</span>` : ""); };
     el.innerHTML = `<span></span><span class="h">TYPO3</span><span class="h">PHP</span><span class="h">DB</span>` + envs.map(([lbl, cls, x]) =>
       `<span class="env ${cls}">${lbl}</span>${t3(x)}${cell(x, "php", x.php)}${cell(x, "db", dbShort(x.db), x.db)}`).join("");
   });
@@ -179,19 +229,51 @@ async function loadT3mSummary(pre) {
     : `<span class="badge ${x.errors ? "sev-2" : "sev0"}">${x.errors} E</span> <span class="badge ${x.warnings ? "sev-1" : "sev0"}">${x.warnings} W</span>`
       + (x.advisories ? ` <span class="badge sev-2" title="${x.advisories} security advisor${x.advisories === 1 ? "y" : "ies"} affect this instance">${x.advisories} SA</span>` : "")
       + (x.php_check?.severity ? ` <span class="badge sev-${x.php_check.severity}" title="${esc(x.php_check.text)}">PHP</span>` : "");
-  const rows = S.projects.map(p => {
+  const projects = S.projects.map(p => {
     const s = d[p.id] || {}, a = s.production, b = s.staging;
+    const checked = [a?.last_check, b?.last_check].filter(Boolean).sort()[0];
+    return {p, a, b, checked};
+  });
+  const focusProjects = [...projects];
+  if (overviewOptions.sort === "name") focusProjects.sort((a, b) => a.p.name.localeCompare(b.p.name));
+  if (overviewOptions.sort === "checked") focusProjects.sort((a, b) => (b.checked || "").localeCompare(a.checked || ""));
+  const ranks = new Map(focusProjects.map(({p}, index) => [p.id, index + 1]));
+  const rows = projects.map(({p, a, b, checked}, index) => {
     const diff = a?.typo3 && b?.typo3 && a.typo3 !== b.typo3;
     const pdiff = a?.php && b?.php && a.php !== b.php;
-    const checks = [a, b].filter(x => x?.last_check).map(x => x.last_check).sort();
-    return `<tr><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
-      ${[[a, ver(a)], [a, ew(a)], [b, ver(b, a)], [b, ew(b)]].map(([x, h]) => `<td class="${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${h}</td>`).join("")}
-      <td class="sub">${checks.length ? esc(fmt(checks[0])) : "–"}</td></tr>`;
+    return `<tr data-rank="${ranks.get(p.id)}" data-original-order="${index}"><td class="focus-row-number">${ranks.get(p.id)}</td><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
+      ${[[a, ver(a)], [b, ver(b, a)]].map(([x, version]) => `<td class="${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${version}
+        ${x?.has_data ? `<div class="focus-env-health">${ew(x)}</div>` : ""}</td>
+        <td class="overview-health ${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${ew(x)}</td>`).join("")}
+      <td class="sub">${checked ? esc(fmt(checked)) : "–"}</td></tr>`;
   }).join("");
   box.innerHTML = `<div class="head" style="margin-bottom:8px"><div><h2 style="margin:0">TYPO3 status – Production &amp; Staging</h2>
-      <div class="sub">From the last t3monitor check · <a href="#/scheduler">Scheduler</a> · “–” = not configured</div></div></div>
-    <div class="wrap"><table class="typo3-overview"><thead><tr><th>Project</th><th>Prod TYPO3</th><th>Prod E/W</th><th>Stg TYPO3</th><th>Stg E/W</th>
+      <div class="sub" data-secondary-copy>From the last t3monitor check · <a href="#/scheduler">Scheduler</a> · “–” = not configured</div></div>
+      <div class="overview-options">
+        <select name="overview-sort" aria-label="Sort projects">
+          ${[["original", "Project order"], ["name", "Project name"], ["checked", "Newest check"]].map(([value, label]) =>
+            `<option value="${value}" ${overviewOptions.sort === value ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+      </div></div>
+    <div class="wrap"><table class="typo3-overview"><thead><tr><th scope="col" class="focus-row-number" aria-label="Row number">#</th><th scope="col">Project</th>
+      <th scope="col"><span class="overview-label">Prod TYPO3</span><span class="focus-env-label">Production</span></th>
+      <th scope="col" class="overview-health">Prod E/W</th>
+      <th scope="col"><span class="overview-label">Stg TYPO3</span><span class="focus-env-label">Staging</span></th>
+      <th scope="col" class="overview-health">Stg E/W</th>
       <th title="Oldest check of the configured instances">Last check</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  updateOverviewOrder();
+  box.querySelector(".overview-options").onchange = ({target}) => {
+    overviewOptions.sort = target.value;
+    loadT3mSummary(d);
+    box.querySelector(`[name="${target.name}"]`).focus();
+  };
+}
+
+function updateOverviewOrder() {
+  const body = $("#t3sum tbody");
+  if (!body) return;
+  const key = document.documentElement.dataset.style === "focus" ? "rank" : "originalOrder";
+  body.append(...[...body.rows].sort((a, b) => Number(a.dataset[key]) - Number(b.dataset[key])));
 }
 
 function viewProject(p, pipelineId) {
@@ -211,25 +293,48 @@ function viewProject(p, pipelineId) {
         <a class="btn sec" href="${pUrl(p)}/edit">Edit</a>
       </div>
     </div>
+    <section class="card system-overview">
+      <div class="system-overview-heading">
+        <h2>System overview</h2>
+        <button type="button" class="btn sec sm scroll-bottom" data-act="scrollbottom"
+          aria-label="Scroll to bottom" title="Scroll to bottom"><span aria-hidden="true">↓</span></button>
+      </div>
+      <div class="system-environments">
+        ${T3M_ENVS.map(e => `<section>
+          <h3>${esc(e.label)}</h3>
+          <div class="system-details" id="system-${e.env}" aria-live="polite">Loading…</div>
+        </section>`).join("")}
+      </div>
+    </section>
     <div class="two">
-      <div class="card"><h2 id="pipeTitle">${pid ? "Pipeline #" + esc(pid) : "Pipeline"}</h2>
-        <div id="pipe">${pid ? `<p class="empty">Loading…</p>` : `<p class="empty">No pipeline started from the launcher yet. Click “Run pipeline”.</p>`}</div></div>
       <div class="stack">
-        <div class="card"><h2>Configuration</h2><dl>
-          <dt>Branch</dt><dd><code>${esc(p.ref)}</code></dd>
-          <dt>Variables</dt><dd>${esc(varsStr(p.variables)) || "–"}</dd>
-          <dt>Auto-play</dt><dd>${esc((p.auto_play || []).join(", ")) || "–"}</dd>
-          <dt>TYPO3 auto</dt><dd>${a.enabled ? `on · v${esc(a.major)} · seen ${esc(S.typo3_seen[p.id] || "–")}` : "off"}</dd>
-          ${a.enabled ? `<dt>Update vars</dt><dd>${esc(varsStr(a.variables)) || "–"}</dd>` : ""}
-          <dt>Production</dt><dd>${p.production?.ref ? `<code>${esc(p.production.ref)}</code>` : "–"}</dd>
-          ${p.production?.ref ? `<dt>Prod vars</dt><dd>${esc(varsStr(p.production.variables)) || "–"}</dd>
-          <dt>Prod auto-play</dt><dd>${esc((p.production.auto_play || []).join(", ")) || "–"}</dd>` : ""}
-        </dl></div>
+        <div class="card"><h2 id="pipeTitle">${pid ? "Pipeline #" + esc(pid) : "Pipeline"}</h2>
+          <div id="pipe">${pid ? `<p class="empty">Loading…</p>` : `<p class="empty">No pipeline started from the launcher yet. Click “Run pipeline”.</p>`}</div></div>
         <div class="card"><h2>Recent runs</h2><div class="runs">
           ${runs.map(r => `<a href="${pUrl(p)}/pl/${Number(r.pipeline)}" class="${r.pipeline === pid ? "on" : ""}">
             <span>#${esc(r.pipeline)} · ${esc(r.trigger)}</span><span class="sub">${esc(fmt(r.t))}</span></a>`).join("")
             || `<p class="empty">No runs yet.</p>`}
         </div></div>
+      </div>
+      <div class="stack">
+        <div class="card project-config"><h2>Configuration</h2>
+          <section>
+            <h3>Pipeline <code>${esc(p.ref)}</code></h3>
+            ${pipelineConfigDetails(p)}
+          </section>
+          ${p.production?.ref ? `<section>
+            <h3>Production <code>${esc(p.production.ref)}</code></h3>
+            ${pipelineConfigDetails(p.production)}
+          </section>` : ""}
+          <section>
+            <h3>Automatic TYPO3 updates <span class="config-status ${a.enabled ? "sev0" : "sub"}">${a.enabled ? "On" : "Off"}</span></h3>
+            ${a.enabled ? `<dl>
+              <dt>Major version</dt><dd>${esc(a.major)}</dd>
+              ${S.typo3_seen[p.id] ? `<dt>Last seen</dt><dd>${esc(S.typo3_seen[p.id])}</dd>` : ""}
+              ${varsStr(a.variables) ? `<dt>Variables</dt><dd><code>${esc(varsStr(a.variables))}</code></dd>` : ""}
+            </dl>` : ""}
+          </section>
+        </div>
         <div class="card danger-zone"><h2>Danger zone</h2>
           <p class="sub" style="margin:0 0 10px">Removes the project from the launcher only. Nothing changes in GitLab.</p>
           <button class="btn danger sm" data-act="del">Remove project</button></div>
@@ -240,6 +345,15 @@ function viewProject(p, pipelineId) {
   $("#view").dataset.project = p.id;
   if (pid) loadPipeline(p, pid);
   T3M_ENVS.forEach(e => loadT3m(p, e));
+}
+
+function pipelineConfigDetails(config) {
+  const variables = varsStr(config.variables), jobs = (config.auto_play || []).join(", ");
+  if (!variables && !jobs) return "";
+  return `<dl>
+    ${variables ? `<dt>Variables</dt><dd><code>${esc(variables)}</code></dd>` : ""}
+    ${jobs ? `<dt>Auto-play</dt><dd><code>${esc(jobs)}</code></dd>` : ""}
+  </dl>`;
 }
 
 // Project without GitLab CI/CD: no pipelines, only TYPO3 status (t3monitor) and extension update messages
@@ -287,11 +401,13 @@ function secBlock(sec) {
 
 async function loadT3m(p, e, refreshNow) {
   const id = "#t3m-" + e.env, box = $(id); if (!box) return;
+  const overview = $("#system-" + e.env);
   const url = p[e.cfg]?.url;
   // Collapsible section: heading + compact status in the summary, details in the body (open state is kept on re-render)
   const set = (meta, body) => box.innerHTML = `<summary>TYPO3 status – ${esc(e.label)} <span class="t3meta">${meta}</span></summary>
     <div class="t3body">${body}</div>`;
   if (!t3mOn(p, e)) {
+    if (overview) overview.textContent = "Monitoring not configured";
     set(`<span class="sub">not configured</span>`, `<p class="empty">Add the ${esc(e.label)} t3monitor URL and key under
       <a href="${pUrl(p)}/edit">Edit</a> to see TYPO3 version, extensions, status checks and their history.</p>`);
     return;
@@ -299,14 +415,19 @@ async function loadT3m(p, e, refreshNow) {
   let d;
   try { d = refreshNow ? await api("/api/t3monitor/refresh", {project:p.id, env:e.env})
                        : await api(`/api/t3monitor?project=${encodeURIComponent(p.id)}&env=${e.env}`); }
-  catch (err) { set(`<span class="sev-2">error</span>`, `<p class="empty">Error: ${esc(err.message)}</p>`); return; }
-  if (!$(id) || $("#view").dataset.project !== p.id) return;
+  catch (err) {
+    if (overview) overview.textContent = "System status unavailable";
+    set(`<span class="sev-2">error</span>`, `<p class="empty">Error: ${esc(err.message)}</p>`);
+    return;
+  }
+  if ($(id) !== box || $("#view").dataset.project !== p.id) return;
   const c = d.current, head = `<div class="head" style="margin-bottom:12px"><div>
       <div class="sub">${c ? esc(c.site_name) + " · " : ""}<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)} ↗</a>
       · last check ${esc(fmt(d.last_check))} · <a href="#/scheduler">schedule: ${esc(S.scheduler.find(t => t.id === "t3monitor")?.cfg.enabled === false ? "off" : S.scheduler.find(t => t.id === "t3monitor")?.schedule)}</a></div></div>
       <button class="btn sec sm" data-act="t3mrefresh" data-env="${e.env}">↻ Refresh now</button></div>
     ${d.last_error ? `<p class="sev-2" style="margin:0 0 12px;font-size:13px">Last check failed: ${esc(d.last_error)}</p>` : ""}`;
   const failed = d.last_error ? `<span class="sev-2" title="${esc(d.last_error)}">⚠ last check failed</span>` : "";
+  if (overview) overview.innerHTML = systemOverview(d);
   if (!c) { set(`<span class="sub">no data yet</span>${failed}`, head + `<p class="empty">No data yet. Click “Refresh now”.</p>`); return; }
   const counts = {}; c.status.forEach(x => counts[x.severity] = (counts[x.severity] || 0) + 1);
   const major = String(c.typo3 || "").split(".")[0], latest = S.typo3_latest[major];
@@ -366,6 +487,22 @@ async function loadT3m(p, e, refreshNow) {
   box.querySelectorAll("tr[data-ext]").forEach(tr => tr.onclick = () => toggleChangelog(tr));
   const sl = box.querySelector(".showLocal");
   if (sl) sl.onchange = () => box.querySelectorAll("tr.local").forEach(r => r.hidden = !sl.checked);
+}
+
+function systemOverview({current, last_check, last_error}) {
+  const check = last_error ? `<span class="sev-2" title="${esc(last_error)}">Last check failed</span>`
+    : last_check ? `Checked ${esc(fmt(last_check))}` : "";
+  if (!current) return check || "No checks yet";
+  const versions = [["TYPO3", current.typo3], ["PHP", current.php],
+    ["Database", dbShort(current.db)], ["Web server", current.webserver]];
+  const errors = current.status.filter(item => item.severity === 2).length;
+  const warnings = current.status.filter(item => item.severity === 1).length;
+  return `<dl>${versions.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "–")}</dd></div>`).join("")}</dl>
+    <div class="system-health">
+      <span class="${errors ? "sev-2" : "sub"}">${errors} errors</span>
+      <span class="${warnings ? "sev-1" : "sub"}">${warnings} warnings</span>
+    </div>
+    ${check ? `<div class="system-check sub">${check}</div>` : ""}`;
 }
 
 // Minimal Markdown -> HTML (everything escaped; only http(s) links, relative ones resolved against the file)
@@ -468,7 +605,7 @@ function t3mFields(e, p) {
           <div class="hint" data-genhint="${e.f}key" style="display:none">Generated locally. Copy this value into the ${esc(e.label.toLowerCase())} site’s t3monitor <b>encryption_key</b>, then Save changes. Must match on both sides.</div>
           ${hasKey ? `<label class="check" style="margin-top:6px"><input type="checkbox" name="${e.f}key_clear"> Remove stored key</label>` : ""}</div>
         <div><label>Basic auth user (optional)</label><input name="${e.f}auth_user" value="${esc(c.auth_user)}" autocomplete="off" placeholder="only if the site is password-protected">
-          <div class="hint">Empty = no basic auth.</div></div>
+          <div class="hint" data-secondary-copy>Empty = no basic auth.</div></div>
         <div><label>Basic auth password</label><input name="${e.f}auth_password" type="password" autocomplete="new-password"
           placeholder="${hasAuth ? "stored – leave empty to keep" : "not stored"}">
           ${hasAuth ? `<label class="check" style="margin-top:6px"><input type="checkbox" name="${e.f}auth_clear"> Remove stored password</label>` : ""}</div>
@@ -496,7 +633,7 @@ function viewForm(p) {
       <div class="card" data-ci><div class="sec-title">Run pipeline</div><div class="fields">
         <div><label>Variables</label><input name="variables" value="${esc(varsStr(v.variables))}" placeholder="KEY=VALUE, KEY2=VALUE2"></div>
         <div><label>Auto-play manual jobs</label><input name="auto_play" value="${esc((v.auto_play || []).join(", "))}" placeholder="build:main">
-          <div class="hint">These manual jobs are started automatically when ready.</div></div>
+          <div class="hint" data-secondary-copy>These manual jobs are started automatically when ready.</div></div>
       </div></div>
       <div class="card" data-ci><div class="sec-title">TYPO3 auto-update</div>
         <label class="check"><input type="checkbox" name="auto_enabled" ${a.enabled ? "checked" : ""}> Start update pipeline when a new TYPO3 release appears</label>
@@ -511,7 +648,7 @@ function viewForm(p) {
           <div class="hint">Empty = no promote. Button appears after a successful pipeline on the branch above.</div></div>
         <div><label>Variables</label><input name="prod_variables" value="${esc(varsStr(v.production?.variables))}" placeholder="KEY=VALUE"></div>
         <div><label>Auto-play manual jobs</label><input name="prod_play" value="${esc((v.production ? v.production.auto_play || [] : v.auto_play || []).join(", "))}">
-          <div class="hint">Pre-filled from the jobs above; edit to differ.</div></div>
+          <div class="hint" data-secondary-copy>Pre-filled from the jobs above; edit to differ.</div></div>
       </div></div>
       ${T3M_ENVS.map(e => t3mFields(e, p)).join("")}
       <div class="actions"><button class="btn" type="submit">${p ? "Save changes" : "Create project"}</button>
@@ -644,8 +781,8 @@ function viewSettings() {
             <button class="btn danger" type="button" data-act="tokendel">Remove</button></div>
         </form></div>
       <div class="card"><h2>Microsoft Teams notifications</h2>
-        <p class="sub" style="margin:0 0 12px">Posts a message to a Teams channel when a pipeline started automatically by the TYPO3 watcher has finished (or could not be started).
-          Create the webhook in Teams: channel → ⋯ → Workflows → "Post to a channel when a webhook request is received".</p>
+        <p class="sub" style="margin:0 0 12px" data-secondary-copy>Posts a message to a Teams channel when a pipeline started automatically by the TYPO3 watcher has finished (or could not be started).</p>
+        ${!S.teams_url_set ? `<p class="sub">Create the webhook in Teams: channel → ⋯ → Workflows → "Post to a channel when a webhook request is received".</p>` : ""}
         <form id="msform" class="stack">
           <label class="check"><input type="checkbox" name="enabled" ${S.teams.enabled ? "checked" : ""}> Send Teams messages</label>
           <div class="fields">
@@ -657,7 +794,7 @@ function viewSettings() {
             ${S.teams_url_set ? `<button class="btn danger" type="button" data-act="teamsdel">Remove URL</button>` : ""}</div>
         </form></div>
       <div class="card"><h2>Email notifications</h2>
-        <p class="sub" style="margin:0 0 12px">Sends an email when a pipeline started automatically by the TYPO3 watcher has finished (or could not be started).</p>
+        <p class="sub" style="margin:0 0 12px" data-secondary-copy>Sends an email when a pipeline started automatically by the TYPO3 watcher has finished (or could not be started).</p>
         <form id="eform" class="stack">
           <label class="check"><input type="checkbox" name="enabled" ${m.enabled ? "checked" : ""}> Send email notifications</label>
           <div class="fields">
@@ -710,28 +847,28 @@ async function saveEmail(extra) {
 function viewScheduler() {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   $("#view").innerHTML = `
-    <div class="head"><div><h1>Scheduler</h1><div class="sub">Automatic tasks; they run while the launcher runs. A run missed while it was off starts right after the next start.</div></div></div>
-    <div class="stack">${S.scheduler.map(t => { const c = t.cfg; return `
-      <form class="card" data-task="${esc(t.id)}">
-        <div class="head" style="margin-bottom:8px"><div><h2 style="margin:0">${esc(t.name)}</h2><div class="sub">${esc(t.description)}</div></div>
+    <div class="head"><div><h1>Scheduler</h1><div class="sub" data-secondary-copy>Automatic tasks; they run while the launcher runs. A run missed while it was off starts right after the next start.</div></div></div>
+    <div class="stack scheduler-tasks">${S.scheduler.map(t => { const c = t.cfg; return `
+      <form class="card scheduler-task" data-task="${esc(t.id)}">
+        <div class="head scheduler-task-heading" style="margin-bottom:8px"><div><h2 style="margin:0">${esc(t.name)}</h2><div class="sub" data-secondary-copy>${esc(t.description)}</div></div>
           <button class="btn sec sm" type="button" data-act="schedrun" data-id="${esc(t.id)}" ${t.running ? "disabled" : ""}>${t.running ? "Running…" : "▶ Run now"}</button></div>
-        <dl style="margin-bottom:14px">
+        <dl class="scheduler-status" style="margin-bottom:14px">
           <dt>Status</dt><dd>${t.blocked ? `<span class="sev-1">paused (launcher started with --no-watch)</span>` : c.enabled ? `<span class="sev0">active</span> · ${esc(t.schedule)}` : `<span class="sev--1">off</span>`}</dd>
           <dt>Last run</dt><dd>${t.last_run ? `${esc(fmt(t.last_run))} · <span class="${t.ok ? "sev0" : "sev-2"}">${t.ok ? "OK" : "failed"}</span>` : "never"}</dd>
           ${t.result ? `<dt>Result</dt><dd>${esc(t.result)}</dd>` : ""}
           <dt>Next run</dt><dd>${t.next_run && !t.blocked ? esc(fmt(t.next_run)) : "–"}</dd>
         </dl>
-        <label class="check"><input type="checkbox" name="enabled" ${c.enabled ? "checked" : ""}> Enabled</label>
-        <div class="fields" style="margin-top:12px">
-          <div><label>Schedule</label><select name="mode">
+        <label class="check scheduler-enabled"><input type="checkbox" name="enabled" ${c.enabled ? "checked" : ""}> Enabled</label>
+        <div class="fields scheduler-fields" style="margin-top:12px">
+          <div><label for="mode-${esc(t.id)}">Schedule</label><select id="mode-${esc(t.id)}" name="mode">
             <option value="interval" ${c.mode === "interval" ? "selected" : ""}>Every N hours</option>
             <option value="daily" ${c.mode === "daily" ? "selected" : ""}>Daily at a fixed time</option></select></div>
-          <div data-for="interval"><label>Every (hours)</label><input name="hours" type="number" min="0.25" max="168" step="0.25" value="${esc(c.hours)}"></div>
-          <div data-for="daily"><label>Time</label><input name="time" type="time" value="${esc(c.time)}"></div>
+          <div data-for="interval"><label for="hours-${esc(t.id)}">Every (hours)</label><input id="hours-${esc(t.id)}" name="hours" type="number" min="0.25" max="168" step="0.25" value="${esc(c.hours)}"></div>
+          <div data-for="daily"><label for="time-${esc(t.id)}">Time</label><input id="time-${esc(t.id)}" name="time" type="time" value="${esc(c.time)}"></div>
         </div>
-        <div data-for="daily" style="margin-top:12px"><label>Weekdays</label><div class="actions">
+        <div class="scheduler-days" data-for="daily" style="margin-top:12px" role="group" aria-labelledby="days-${esc(t.id)}"><div class="scheduler-days-label" id="days-${esc(t.id)}">Weekdays</div><div class="actions">
           ${days.map((d, i) => `<label class="check"><input type="checkbox" name="day" value="${i}" ${c.days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div></div>
-        <div class="actions" style="margin-top:14px"><button class="btn" type="submit">Save</button><button class="btn sec" type="submit" data-close="1">Save &amp; close</button></div>
+        <div class="actions scheduler-save" style="margin-top:14px"><button class="btn" type="submit">Save</button><button class="btn sec" type="submit" data-close="1">Save &amp; close</button></div>
       </form>`; }).join("")}
     </div>`;
   viewScheduler.dirty = false;
@@ -752,6 +889,10 @@ function viewScheduler() {
 
 /* ---------------- actions ---------------- */
 const actions = {
+  scrollbottom() {
+    window.scrollTo({top: document.documentElement.scrollHeight,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"});
+  },
   async run(el) {
     const p = proj($("#view").dataset.project), upd = el.dataset.mode === "update";
     if (!confirm(`Start ${upd ? "TYPO3 update pipeline" : "pipeline"} for ${p.name} (${p.ref})?`)) return;

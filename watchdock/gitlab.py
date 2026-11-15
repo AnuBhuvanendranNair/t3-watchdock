@@ -62,6 +62,11 @@ def gitlab(project, method, path, body=None):
             raw = r.read()
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise RuntimeError(
+                "GitLab denied access. Connect to your VPN and try again. "
+                "If you’re already connected, check your GitLab token in Settings."
+            ) from None
         detail = e.read().decode(errors="replace")[:500]
         if detail.lstrip().startswith("<"):          # HTML error page (proxy/auth) -> status only
             detail = e.reason
@@ -114,6 +119,8 @@ def run_pipeline(project, variables, trigger, play_jobs=(), ref=None):
         st.setdefault("runs", []).insert(0, {
             "t": now(), "project": project["id"], "pipeline": p["id"],
             "web_url": p.get("web_url"), "trigger": trigger, "ref": ref})
+        st["projects_with_runs"] = sorted(set(st.get("projects_with_runs", []))
+                                          | {run["project"] for run in st["runs"]})
         del st["runs"][100:]
         save(STATE, st)
     log(f"Pipeline #{p['id']} started: {project['path']} @ {ref} ({trigger})")
