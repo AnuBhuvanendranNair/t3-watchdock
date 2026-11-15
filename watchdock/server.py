@@ -87,9 +87,14 @@ class Handler(BaseHTTPRequestHandler):
                     "typo3_latest": st.get("typo3_latest", {}),
                     "typo3_seen": st.get("typo3_seen", {}),
                     "runs": st.get("runs", [])[:30],
+                    "projects_with_runs": sorted(set(st.get("projects_with_runs", []))
+                                                 | {run["project"] for run in st.get("runs", [])}),
                     "log": st.get("log", [])[:50]})
             if u.path == "/api/project-info":
                 return self._send(200, project_info(q["gitlab_url"][0], q["path"][0], q.get("ref", [""])[0]))
+            if u.path == "/api/project-avatar":
+                p = find_project(q["project"][0])
+                return self._send(200, {"url": gitlab(p, "GET", "").get("avatar_url")})
             if u.path == "/api/ext/changelog":
                 return self._send(200, ext_changelog(q["composer"][0], q["version"][0], q.get("installed", [""])[0]))
             if u.path == "/api/t3monitor/summary":
