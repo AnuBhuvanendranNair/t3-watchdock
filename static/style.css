@@ -361,3 +361,21 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
   [data-style="focus"] .scheduler-fields,
   [data-style="focus"] .scheduler-days{grid-column:2}
 }
+
+.monitor-key-actions{margin-top:8px}
+.monitor-saved-key [hidden]{display:none}
+.monitor-saved-key input{margin-top:8px}
+.monitor-fields>*+*,.monitor-auth>div+div{margin-top:12px}
+.monitor-form-heading{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 12px}
+.monitor-form-heading .sec-title{font-size:18px}
+.project-monitoring-grid{display:grid;gap:16px}
+[data-style="focus"] #pform .sec-title{font-size:18px;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--bd)}
+[data-style="focus"] .monitor-form-heading{border-bottom:1px solid var(--bd);padding-bottom:10px;margin-bottom:14px}
+[data-style="focus"] #pform .monitor-form-heading .sec-title{border:0;margin:0;padding:0}
+[data-style="focus"] .monitor-key-field input,
+[data-style="focus"] .monitor-saved-key input{font-family:ui-monospace,Menlo,monospace}
+[data-style="focus"] .project-form-actions{position:sticky;bottom:0;z-index:2;align-items:center;justify-content:flex-end;padding:12px;background:var(--bg);border-top:1px solid var(--bd)}
+[data-style="focus"] [data-form-dirty]{margin-right:auto}
+@media (min-width:820px){
+  [data-style="focus"] .project-monitoring-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+}
