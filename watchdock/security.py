@@ -1,14 +1,20 @@
-"""PHP version support (endoflife.date) and security advisories for TYPO3 core and extensions (Packagist)."""
+"""PHP version support (endoflife.date), security advisories for TYPO3 core and extensions (Packagist)
+and the TYPO3 security announcement feed (news.typo3.com)."""
 import datetime
+import email.utils
 import json
+import re
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 
 from .extensions import _vparse, constraint_ok
 
 PHP_EOL_API = "https://endoflife.date/api/php.json"             # per branch: latest, support (active), eol
 ADVISORY_API = "https://packagist.org/api/security-advisories/"  # FriendsOfPHP + GitHub advisories per package
 ADVISORY_BATCH = 100                                            # packages per request
+TYPO3_SEC_FEED = "https://news.typo3.com/security/rss-security"  # advisories + public service announcements (PSA)
+FEED_MAX = 2_000_000                                            # bytes read from the feed at most
 
 
 def _json(url, data=None):
@@ -86,3 +92,34 @@ def site_advisories(packages, adv):
                               "cve": a.get("cve"), "severity": a.get("severity"), "link": a.get("link"),
                               "affected": a.get("affectedVersions")})
     return found
+
+
+def parse_security_feed(raw):
+    """RSS bytes -> [{'id', 'ref', 'title', 'link', 'date', 'category', 'psa'}, ...], newest first as in the feed."""
+    if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:        # a plain RSS feed needs neither; no entity expansion
+        raise RuntimeError("unexpected document type")
+    items = []
+    for it in ET.fromstring(raw).iter("item"):
+        title = " ".join((it.findtext("title") or "").split())
+        link = (it.findtext("link") or "").strip()
+        if not title or not re.match(r"https://[^\s/]+/\S*$", link):   # the link is shown as a clickable URL
+            continue
+        m = re.match(r"TYPO3-[A-Z]+(?:-[A-Z]+)*-\d{4}-\d+", title)
+        try:
+            date = email.utils.parsedate_to_datetime(it.findtext("pubDate") or "").date().isoformat()
+        except (TypeError, ValueError):
+            date = ""
+        items.append({"id": (it.findtext("guid") or link).strip()[:300], "ref": m.group(0) if m else "",
+                      "title": title[:300], "link": link[:500], "date": date,
+                      "category": ", ".join(c.text.strip() for c in it.findall("category") if c.text)[:100],
+                      "psa": bool(m and "-PSA-" in m.group(0))})
+    return items
+
+
+def typo3_security_feed():
+    try:
+        req = urllib.request.Request(TYPO3_SEC_FEED, headers={"User-Agent": "t3-watchdock"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return parse_security_feed(r.read(FEED_MAX))
+    except Exception as e:
+        raise RuntimeError(f"TYPO3 security feed (news.typo3.com) not available: {e}") from None

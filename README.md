@@ -119,10 +119,11 @@ Page *Scheduler* (top menu) lists the automatic tasks:
 | TYPO3 release check | Checks `get.typo3.org`; on a new release: Teams announcement, then the update pipelines on staging |
 | t3monitor check (TYPO3 & extensions) | Reads TYPO3 version, extensions and status checks of every instance (production, staging) with t3monitor URL and key |
 | PHP version & security advisories | For every instance with t3monitor data: PHP version against support dates (end of life, newer patch release), TYPO3 core and public extensions against known security advisories; one message per run, only for new findings |
+| TYPO3 security announcements | Reads the TYPO3 security feed (`news.typo3.com/security/rss-security`): core and extension advisories and public service announcements (e.g. security release pre-announcements). The first run stores the current entries; afterwards one message per run for new entries. The latest entries are listed on the *Activity* page |
 
 - Per task: on/off, *Every N hours* (0.25–168) or *Daily at a fixed time* on chosen weekdays; shows last run, result and next run; **▶ Run now**.
 - Tasks run only while the launcher runs (checked every 30 s). A run missed while it was off starts right after the next start.
-- Default until a schedule is saved: every 6 h (or the old `check_interval_hours` / `t3monitor_interval_hours`); PHP version & security advisories: daily at 07:00.
+- Default until a schedule is saved: every 6 h (or the old `check_interval_hours` / `t3monitor_interval_hours`); PHP version & security advisories: daily at 07:00; TYPO3 security announcements: every 3 h.
 - `python3 app.py --no-watch` pauses the TYPO3 release check (shown as *paused*).
 
 ## TYPO3 status (t3monitor)
@@ -229,7 +230,7 @@ Notes:
 - `Origin` check and `application/json` requirement on POST against cross-site requests
 - Secrets (GitLab token, Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form; the project export file contains t3monitor keys and Basic auth passwords in plain text. Both work only on a same-origin HTTPS or localhost request
 - Token, secrets, config, state, t3monitor history and logs are gitignored
-- Outgoing connections: GitLab (only to the GitLab URLs of configured projects), `get.typo3.org`, the Teams webhook / SMTP server if enabled, the t3monitor site URLs, `repo.packagist.org` (only public Composer package names are sent), and — when a changelog is opened — `api.github.com`, `raw.githubusercontent.com` or `gitlab.com` (public repository paths and tags only)
+- Outgoing connections: GitLab (only to the GitLab URLs of configured projects), `get.typo3.org`, `news.typo3.com` (security feed), the Teams webhook / SMTP server if enabled, the t3monitor site URLs, `repo.packagist.org` (only public Composer package names are sent), and — when a changelog is opened — `api.github.com`, `raw.githubusercontent.com` or `gitlab.com` (public repository paths and tags only)
 
 ## Files
 

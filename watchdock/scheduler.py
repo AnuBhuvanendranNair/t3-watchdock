@@ -6,7 +6,7 @@ import threading
 
 from .core import CONFIG, STATE, config, load, lock, log, now, save, stop_event
 from .alerts import notify_event
-from .security import advisories, php_cycles, php_status, site_advisories, site_packages
+from .security import advisories, php_cycles, php_status, site_advisories, site_packages, typo3_security_feed
 from .t3monitor import T3M_ENVS, _n, _upd_text, t3m_cfg, t3m_fetch, t3m_history_file, t3m_key
 from .watcher import check_typo3
 from .updates import send_update_commands
@@ -113,6 +113,35 @@ def task_security():
     return summary + (f" · {n_new} new" if n_new else "")
 
 
+def task_typo3_news():
+    """TYPO3 security announcements (advisories and PSA). One message per run, only for items not seen before.
+    The first run only stores what is there (no message for old announcements)."""
+    items = typo3_security_feed()
+    if not items:
+        raise RuntimeError("TYPO3 security feed contains no announcements")
+    with lock:
+        st = load(STATE, {})
+        old = st.get("typo3_security") or {}
+        first, seen = "seen" not in old, set(old.get("seen", []))
+        new = [] if first else [i for i in items if i["id"] not in seen]
+        st["typo3_security"] = {"checked": now(), "seen": ([i["id"] for i in items] + [x for x in old.get("seen", [])
+                                                               if x not in {i["id"] for i in items}])[:1000],
+                                "items": items[:30]}
+        save(STATE, st)
+    for i in new:
+        log(f"TYPO3 security: {i['title']} {i['link']}")
+    if new:
+        psa = sum(1 for i in new if i["psa"])
+        notify_event(f"TYPO3 security: {_n(len(new), 'new announcement')}" + (f" ({psa} PSA)" if psa else ""),
+                     "New entries in the TYPO3 security feed (news.typo3.com). Affected sites are listed by the "
+                     "PHP version & security advisories check; announcements (PSA) need a manual look.",
+                     [(i["ref"] or i["date"] or "–", f"{i['title']} {i['link']}") for i in new],
+                     new[0]["link"], "Open announcement")
+    if first:
+        return f"{_n(len(items), 'announcement')} stored as baseline (messages from the next new one on)"
+    return f"{_n(len(items), 'announcement')} · {len(new)} new" + (f" · latest: {items[0]['title'][:120]}")
+
+
 TASKS = {
     "typo3_release": {"name": "TYPO3 release check", "run": task_typo3_release, "legacy": "check_interval_hours",
                       "description": "Checks get.typo3.org for new TYPO3 releases; on a new version the update "
@@ -125,6 +154,11 @@ TASKS = {
                  "description": "Checks the PHP version of every site against php.net support dates (endoflife.date) "
                                 "and TYPO3 core and extensions against known security advisories (Packagist). "
                                 "Uses the data of the last t3monitor check; messages only for new findings."},
+    "typo3_news": {"name": "TYPO3 security announcements", "run": task_typo3_news, "legacy": "typo3_news_interval_hours",
+                   "defaults": {"hours": 3.0},
+                   "description": "Reads the TYPO3 security feed (news.typo3.com): core and extension advisories and "
+                                  "public service announcements such as security release pre-announcements. "
+                                  "Messages only for new entries; the list is on the Activity page."},
 }
 
 
