@@ -12,7 +12,7 @@ from .extensions import ext_changelog
 from .gitlab import find_project, gitlab, project_info, promote, require_ci, run_pipeline, save_token, search_projects, test_token, token_source
 from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_fetch, t3m_key, t3m_key_file, t3m_summary, t3m_view
 from .watcher import resume_mail_watches
-from .projects import add_project, update_project
+from .projects import add_project, export_projects, import_projects, update_project
 from .updates import send_now
 from .scheduler import TASKS, save_sched, sched_run, sched_view, scheduler
 
@@ -48,6 +48,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
         return True
+
+    def _secret_ok(self):
+        """Secrets leave the app only on a same-origin HTTPS or localhost request."""
+        host = self.headers.get("Host", "")
+        secure = isinstance(self.connection, ssl.SSLSocket)
+        loopback = host.split(":", 1)[0] in {"127.0.0.1", "localhost"}
+        origin = ("https://" if secure else "http://") + host
+        return (secure or loopback) and self.headers.get("Origin") == origin
 
     def _send(self, code, data, ctype="application/json"):
         body = data if isinstance(data, bytes) else json.dumps(data).encode()
@@ -148,11 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                 log("GitLab token removed from app folder")
                 return self._send(200, {"ok": True})
             if path == "/api/t3monitor/reveal-key":
-                host = self.headers.get("Host", "")
-                secure = isinstance(self.connection, ssl.SSLSocket)
-                loopback = host.split(":", 1)[0] in {"127.0.0.1", "localhost"}
-                origin = ("https://" if secure else "http://") + host
-                if not (secure or loopback) or self.headers.get("Origin") != origin:
+                if not self._secret_ok():
                     return self._send(403, {"error": "Reveal requires a same-origin HTTPS or localhost request"})
                 p = find_project(body["project"])
                 key = t3m_key(p["id"], body["env"])
@@ -197,6 +201,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, add_project(body))
             if path == "/api/projects/update":
                 return self._send(200, update_project(body))
+            if path == "/api/projects/export":
+                if not self._secret_ok():
+                    return self._send(403, {"error": "Export requires a same-origin HTTPS or localhost request"})
+                return self._send(200, export_projects())
+            if path == "/api/projects/import":
+                return self._send(200, import_projects(body.get("data"), bool(body.get("overwrite"))))
             if path == "/api/projects/delete":
                 with lock:
                     cfg = config()
