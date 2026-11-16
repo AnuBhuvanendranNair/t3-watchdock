@@ -276,6 +276,22 @@ function updateOverviewOrder() {
   body.append(...[...body.rows].sort((a, b) => Number(a.dataset[key]) - Number(b.dataset[key])));
 }
 
+// "System overview" card (Production / Staging tiles); filled by loadT3m via #system-<env>
+const systemOverviewCard = () => `
+    <section class="card system-overview">
+      <div class="system-overview-heading">
+        <h2>System overview</h2>
+        <button type="button" class="btn sec sm scroll-bottom" data-act="scrollbottom"
+          aria-label="Scroll to bottom" title="Scroll to bottom"><span aria-hidden="true">↓</span></button>
+      </div>
+      <div class="system-environments">
+        ${T3M_ENVS.map(e => `<section>
+          <h3>${esc(e.label)}</h3>
+          <div class="system-details" id="system-${e.env}" aria-live="polite">Loading…</div>
+        </section>`).join("")}
+      </div>
+    </section>`;
+
 function viewProject(p, pipelineId) {
   if (!hasCI(p)) return viewProjectNoCI(p);
   const a = p.auto_typo3 || {};
@@ -293,19 +309,7 @@ function viewProject(p, pipelineId) {
         <a class="btn sec" href="${pUrl(p)}/edit">Edit</a>
       </div>
     </div>
-    <section class="card system-overview">
-      <div class="system-overview-heading">
-        <h2>System overview</h2>
-        <button type="button" class="btn sec sm scroll-bottom" data-act="scrollbottom"
-          aria-label="Scroll to bottom" title="Scroll to bottom"><span aria-hidden="true">↓</span></button>
-      </div>
-      <div class="system-environments">
-        ${T3M_ENVS.map(e => `<section>
-          <h3>${esc(e.label)}</h3>
-          <div class="system-details" id="system-${e.env}" aria-live="polite">Loading…</div>
-        </section>`).join("")}
-      </div>
-    </section>
+    ${systemOverviewCard()}
     <div class="two">
       <div class="stack">
         <div class="card"><h2 id="pipeTitle">${pid ? "Pipeline #" + esc(pid) : "Pipeline"}</h2>
@@ -368,6 +372,7 @@ function viewProjectNoCI(p) {
         <a class="btn sec" href="${pUrl(p)}/edit">Edit</a>
       </div>
     </div>
+    ${systemOverviewCard()}
     ${T3M_ENVS.map(e => `<details class="card full t3env" id="t3m-${e.env}"><summary>TYPO3 status – ${esc(e.label)}
       <span class="t3meta sub">Loading…</span></summary></details>`).join("")}
     <div class="card danger-zone" style="margin-top:18px"><h2>Danger zone</h2>
