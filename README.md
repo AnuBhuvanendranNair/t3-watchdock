@@ -23,6 +23,7 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 
 - **Project list** — GitLab projects (path + branch) managed in the UI, stored in `config.json`
 - **Project form pre-fill** — new projects start with defaults (staging/production, `build:main`, TYPO3 13, `TARGET_TASK_NAME=shup01`); branch, production branch and TYPO3 major are select boxes; when GitLab is reachable, project path search plus name, branches, manual jobs (CI lint) and TYPO3 major are read from GitLab
+- **Export / import projects** — *Settings → Export / import projects* writes all projects including their t3monitor keys and Basic auth passwords to one JSON file and reads such a file again (existing projects are skipped unless *Overwrite* is ticked). The GitLab token, Teams webhook URL and SMTP password are never exported
 - **Run pipelines** — normal run or "TYPO3 update" run, each with its own CI variables
 - **Run all** — start the normal pipeline of every project with CI/CD at once (one confirmation, failures reported per project)
 - **Projects without CI/CD** — untick *Uses GitLab CI/CD* in the project form: no pipelines, no TYPO3 auto-update, no *Run all*; the project page shows only the TYPO3 status (t3monitor). Path and branch are optional; with a branch, extension update messages contain ready-to-run commands, without one they only list the updates
@@ -226,7 +227,7 @@ Notes:
 - Optional HTTPS with a local mkcert certificate
 - `Host` header check against DNS rebinding
 - `Origin` check and `application/json` requirement on POST against cross-site requests
-- Secrets (GitLab token, Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form
+- Secrets (GitLab token, Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form; the project export file contains t3monitor keys and Basic auth passwords in plain text. Both work only on a same-origin HTTPS or localhost request
 - Token, secrets, config, state, t3monitor history and logs are gitignored
 - Outgoing connections: GitLab (only to the GitLab URLs of configured projects), `get.typo3.org`, the Teams webhook / SMTP server if enabled, the t3monitor site URLs, `repo.packagist.org` (only public Composer package names are sent), and — when a changelog is opened — `api.github.com`, `raw.githubusercontent.com` or `gitlab.com` (public repository paths and tags only)
 
@@ -241,7 +242,7 @@ Notes:
 | `watchdock/extensions.py` | Extension update check (Packagist) and changelogs |
 | `watchdock/t3monitor.py` | t3monitor client, history, change detection |
 | `watchdock/watcher.py` | TYPO3 release watcher, pipeline result mails |
-| `watchdock/projects.py` | Create / update project entries |
+| `watchdock/projects.py` | Create / update project entries, export / import |
 | `watchdock/scheduler.py` | Background scheduler |
 | `watchdock/server.py` | HTTP server and API routes |
 | `static/` | Web UI (`index.html`, `style.css`, `app.js`) |

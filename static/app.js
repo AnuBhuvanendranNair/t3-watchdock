@@ -874,6 +874,14 @@ function viewSettings() {
             <button class="btn sec" type="button" data-act="mailtest">Save &amp; send test email</button>
             ${S.email_password_set ? `<button class="btn danger" type="button" data-act="mailpwdel">Remove password</button>` : ""}</div>
         </form></div>
+      <div class="card"><h2>Export / import projects</h2>
+        <p class="sub" style="margin:0 0 12px" data-secondary-copy>The export file contains all projects with their t3monitor keys and Basic auth passwords in plain text – pass it on over a trusted channel only. The GitLab token, Teams webhook and SMTP password are never exported.</p>
+        <div class="stack">
+          <div class="actions"><button class="btn sec" type="button" data-act="projexport">Export projects</button></div>
+          <div class="fields"><div><label>Export file</label><input id="impFile" type="file" accept=".json,application/json"></div></div>
+          <label class="check"><input type="checkbox" id="impOverwrite"> Overwrite projects that already exist (otherwise they are skipped)</label>
+          <div class="actions"><button class="btn sec" type="button" data-act="projimport">Import projects</button></div>
+        </div></div>
       <div class="card"><h2>TYPO3 release check</h2><dl>
         <dt>Schedule</dt><dd>${esc(S.scheduler.find(t => t.id === "typo3_release").schedule)} · <a href="#/scheduler">change in Scheduler</a></dd>
         <dt>Last check</dt><dd>${esc(fmt(S.last_check))}</dd>
@@ -1035,6 +1043,33 @@ const actions = {
   async t3mrefresh(el) {
     el.disabled = true; el.textContent = "Checking…";
     await loadT3m(proj($("#view").dataset.project), T3M_ENVS.find(e => e.env === el.dataset.env), true);
+  },
+  async projexport(el) {
+    el.disabled = true;
+    try {
+      const d = await api("/api/projects/export", {}), n = new Date(), z = x => String(x).padStart(2, "0");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], {type:"application/json"}));
+      a.download = `t3-watchdock-projects-${n.getFullYear()}${z(n.getMonth() + 1)}${z(n.getDate())}.json`;
+      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      toast(`${d.projects.length} projects exported (file contains keys and passwords)`);
+    } catch (e) { toast(e.message, true); }
+    el.disabled = false;
+  },
+  async projimport(el) {
+    const file = $("#impFile").files[0], overwrite = $("#impOverwrite").checked;
+    if (!file) return toast("Choose an export file first", true);
+    let data;
+    try { data = JSON.parse(await file.text()); } catch { return toast("The file is not valid JSON", true); }
+    const list = Array.isArray(data?.projects) ? data.projects : [];
+    const hosts = [...new Set(list.map(x => x?.project?.gitlab_url).filter(Boolean))];   // the GitLab token is sent to these hosts
+    if (!confirm(`Import ${list.length} projects${overwrite ? " and overwrite existing ones" : ""}?\n\nGitLab hosts in this file (your GitLab token is sent to them):\n${hosts.join("\n") || "–"}`)) return;
+    el.disabled = true;
+    try {
+      const r = await api("/api/projects/import", {data, overwrite});
+      await refresh(); viewSettings();
+      toast(`Import: ${r.added.length} added, ${r.updated.length} updated, ${r.skipped.length} skipped`);
+    } catch (e) { toast(e.message, true); el.disabled = false; }
   },
   async tokentest() { try { toast((await api("/api/token/test", {})).msg); } catch (e) { toast(e.message, true); } },
   async tokendel() {
