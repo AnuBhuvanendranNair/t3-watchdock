@@ -811,9 +811,18 @@ function viewForm(p) {
 }
 
 function viewActivity() {
+  const sec = S.typo3_security || {};
   $("#view").innerHTML = `
     <div class="head"><h1>Activity</h1></div>
     <div class="stack">
+      <div class="card"><h2>TYPO3 security announcements</h2>
+        <p class="sub" style="margin:0 0 12px">Source: news.typo3.com · last check: ${esc(fmt(sec.checked))} · <a href="#/scheduler">Scheduler</a></p>
+        <div class="wrap"><table><tbody>
+        ${(sec.items || []).slice(0, 15).map(i => `<tr><td class="sub" style="white-space:nowrap">${esc(i.date || "–")}</td>
+          <td>${i.psa ? `<span class="badge sev-2">PSA</span> ` : ""}<a
+            href="${/^https:\/\//.test(i.link) ? esc(i.link) : "#"}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a></td></tr>`).join("")
+          || `<tr><td class="empty">Not checked yet.</td></tr>`}
+        </tbody></table></div></div>
       <div class="card"><h2>Pipeline runs</h2><div class="wrap"><table>
         <thead><tr><th>Time</th><th>Project</th><th>Pipeline</th><th>Trigger</th></tr></thead><tbody>
         ${S.runs.map(r => { const p = proj(r.project); return `<tr><td>${esc(fmt(r.t))}</td>

@@ -94,6 +94,7 @@ class Handler(BaseHTTPRequestHandler):
                     "last_check": st.get("last_check"),
                     "typo3_latest": st.get("typo3_latest", {}),
                     "typo3_seen": st.get("typo3_seen", {}),
+                    "typo3_security": {k: (st.get("typo3_security") or {}).get(k) for k in ("checked", "items")},
                     "runs": st.get("runs", [])[:30],
                     "projects_with_runs": sorted(set(st.get("projects_with_runs", []))
                                                  | {run["project"] for run in st.get("runs", [])}),
