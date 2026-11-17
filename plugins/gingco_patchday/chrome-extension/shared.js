@@ -31,6 +31,8 @@ const wdOrigin = wd => { const u = new URL(wd); return u.protocol + '//' + u.hos
 async function syncBridge(wd) {
   await chrome.scripting.unregisterContentScripts({ ids: ['wd-bridge'] }).catch(() => {});
   const origin = wdOrigin(wd);
+  const fixed = chrome.runtime.getManifest().content_scripts.flatMap(c => c.matches);
+  if (fixed.includes(origin)) return true;              // Standard-Adresse: Brücke kommt aus manifest.json
   if (!(await chrome.permissions.contains({ origins: [origin] }))) return false;
   await chrome.scripting.registerContentScripts([{ id: 'wd-bridge', matches: [origin], js: ['wd-bridge.js'], runAt: 'document_idle' }]);
   return true;
