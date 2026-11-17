@@ -395,3 +395,13 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 @keyframes runpulse{50%{opacity:.25}}
 @media (prefers-reduced-motion:reduce){.runst .dot{animation:none}}
 .pcard.run-active{border-color:var(--run);box-shadow:0 0 0 1px var(--run)}
+
+/* icons (Lucide sprite in index.html) */
+.ic{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
+.ic.sm{width:14px;height:14px;vertical-align:-2px}
+.btn.icon{padding:8px;justify-content:center}
+.btn.sm.icon{padding:5px}
+.theme-btn{display:inline-flex;align-items:center;padding:5px 8px}
+.pplay .ic{width:14px;height:14px}
+.busy .ic{animation:pspin .8s linear infinite}
+@media (prefers-reduced-motion:reduce){.busy .ic{animation:none}}

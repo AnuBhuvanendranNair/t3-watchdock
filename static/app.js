@@ -1,5 +1,9 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// Icon from the inline sprite in index.html (Lucide, ISC); decorative, the button carries title + aria-label
+const ic = (name, cls = "") => `<svg class="ic${cls ? " " + cls : ""}" aria-hidden="true" focusable="false"><use href="#i-${name}"/></svg>`;
+// Icon-only button: tooltip and accessible name from one text
+const icBtn = (name, label, attrs = "", cls = "btn sec icon") => `<button type="button" class="${cls}" title="${esc(label)}" aria-label="${esc(label)}" ${attrs}>${ic(name)}</button>`;
 const ACTIVE = ["created","waiting_for_resource","preparing","pending","running","manual","scheduled"];
 let S = null, pollT = null;
 
@@ -26,7 +30,7 @@ const pUrl = p => `#/p/${encodeURIComponent(p.id)}`;
 /* ---------------- plugins (plugins/<name>, switched on in config.json) ---------------- */
 // A plugin script calls watchdock.register({projectPage(p, view), settingsPage(stack)}); hooks run after each render.
 const PLUGINS = [];
-window.watchdock = {register: hooks => PLUGINS.push(hooks), api, esc, toast, proj: id => proj(id), state: () => S};
+window.watchdock = {register: hooks => PLUGINS.push(hooks), api, esc, toast, ic, proj: id => proj(id), state: () => S};
 const pluginHook = (name, ...args) => PLUGINS.forEach(h => { try { h[name]?.(...args); } catch (e) { console.error(e); } });
 async function loadPlugins() {
   let list; try { list = await api("/api/plugins"); } catch { return; }
@@ -44,14 +48,14 @@ const dbShort = v => { const m = String(v || "").match(/(\d+\.\d+(?:\.\d+)?)/); 
 const fmt = t => t ? t.replace("T", " ") : "–";
 
 // Theme switch in the header: Auto (system) → Light → Dark; saved per browser
-const THEMES = [{id:"auto", label:"◐ Auto", hint:"follows the system setting"},
-  {id:"light", label:"☀ Light", hint:"always light"}, {id:"dark", label:"☾ Dark", hint:"always dark"}];
+const THEMES = [{id:"auto", icon:"auto", hint:"follows the system setting"},
+  {id:"light", icon:"sun", hint:"always light"}, {id:"dark", icon:"moon", hint:"always dark"}];
 function setTheme(id, save) {
   const root = document.documentElement, t = THEMES.find(x => x.id === id) || THEMES[0];
   if (t.id === "auto") delete root.dataset.theme; else root.dataset.theme = t.id;
   if (save) try { t.id === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", t.id); } catch (e) {}
   const b = $("#themeBtn"), next = THEMES[(THEMES.indexOf(t) + 1) % THEMES.length];
-  b.textContent = t.label; b.title = `Theme: ${t.id} (${t.hint}). Click for ${next.id}.`;
+  b.innerHTML = ic(t.icon); b.title = `Theme: ${t.id} (${t.hint}). Click for ${next.id}.`;
   b.setAttribute("aria-label", b.title);
 }
 setTheme(document.documentElement.dataset.theme || "auto");
@@ -220,8 +224,8 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
   $("#view").innerHTML = `
     <div class="head"><div><h1>Projects</h1><div class="sub" data-secondary-copy>${S.projects.length} project(s) · <span class="srvlegend"><span class="upd">↑</span> TYPO3 update available · <span class="diff">≠</span> staging differs from production</span></div></div>
       <div class="actions">
-        ${S.projects.some(hasCI) ? `<button class="btn" data-act="runall">▶ Run all</button>` : ""}
-        <a class="btn sec" href="#/new">+ New project</a></div></div>
+        ${S.projects.some(hasCI) ? icBtn("play", "Run all: start the main pipeline (not production) of every CI/CD project", `data-act="runall"`, "btn icon") : ""}
+        <a class="btn sec icon" href="#/new" title="New project" aria-label="New project">${ic("plus")}</a></div></div>
     ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">No projects yet. <a href="#/new">Create one</a>.</div>`}
     ${S.projects.length ? `<div class="card full" id="t3sum" style="margin-top:18px"><h2>TYPO3 status – Production &amp; Staging</h2><p class="empty">Loading…</p></div>` : ""}`;
   if (document.documentElement.dataset.style === "focus") loadFocusAvatars();
@@ -350,12 +354,12 @@ function viewProject(p, pipelineId) {
     <div class="crumb"><a href="#/">Projects</a> / ${esc(p.name)}</div>
     <div class="head">
       <div><h1>${esc(p.name)}</h1>
-        <div class="sub">${esc(p.path)} · <code>${esc(p.ref)}</code> · <a href="${esc(glUrl(p))}" target="_blank" rel="noopener">Open in GitLab ↗</a></div></div>
+        <div class="sub">${esc(p.path)} · <code>${esc(p.ref)}</code> · <a href="${esc(glUrl(p))}" target="_blank" rel="noopener">GitLab ${ic("ext", "sm")}</a></div></div>
       <div class="actions">
-        <button class="btn" data-act="run" data-mode="normal">▶ Run pipeline</button>
-        ${a.enabled ? `<button class="btn sec" data-act="run" data-mode="update">Run TYPO3 update</button>` : ""}
-        <button class="btn sec" data-act="updsend" title="Send ready-to-run commands for pending extension updates via Teams / email">Send update commands</button>
-        <a class="btn sec" href="${pUrl(p)}/edit">Edit</a>
+        ${icBtn("play", "Run pipeline", `data-act="run" data-mode="normal"`, "btn icon")}
+        ${a.enabled ? icBtn("update", "Run TYPO3 update (staging pipeline)", `data-act="run" data-mode="update"`) : ""}
+        ${icBtn("send", "Send update commands: ready-to-run commands for pending extension updates via Teams / email", `data-act="updsend"`)}
+        <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
     </div>
     ${systemOverviewCard()}
@@ -418,8 +422,8 @@ function viewProjectNoCI(p) {
       <div><h1>${esc(p.name)}</h1>
         <div class="sub"><span class="chip">no CI/CD</span>${p.path ? ` · ${esc(p.path)}` : ""}${p.ref ? ` · <code>${esc(p.ref)}</code>` : ""}</div></div>
       <div class="actions">
-        <button class="btn sec" data-act="updsend" title="Send pending extension updates via Teams / email${p.ref ? " (with ready-to-run commands)" : ""}">Send update list</button>
-        <a class="btn sec" href="${pUrl(p)}/edit">Edit</a>
+        ${icBtn("send", `Send update list: pending extension updates via Teams / email${p.ref ? " (with ready-to-run commands)" : ""}`, `data-act="updsend"`)}
+        <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
     </div>
     ${systemOverviewCard()}
@@ -478,13 +482,13 @@ async function loadT3m(p, e, refreshNow) {
   }
   if ($(id) !== box || $("#view").dataset.project !== p.id) return;
   const c = d.current, head = `<div class="head" style="margin-bottom:12px"><div>
-      <div class="sub">${c ? esc(c.site_name) + " · " : ""}<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)} ↗</a>
+      <div class="sub">${c ? esc(c.site_name) + " · " : ""}<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)} ${ic("ext", "sm")}</a>
       · last check ${esc(fmt(d.last_check))} · <a href="#/scheduler">schedule: ${esc(S.scheduler.find(t => t.id === "t3monitor")?.cfg.enabled === false ? "off" : S.scheduler.find(t => t.id === "t3monitor")?.schedule)}</a></div></div>
-      <button class="btn sec sm" data-act="t3mrefresh" data-env="${e.env}">↻ Refresh now</button></div>
+      ${icBtn("refresh", `Refresh ${e.label} status now`, `data-act="t3mrefresh" data-env="${e.env}"`, "btn sec sm icon")}</div>
     ${d.last_error ? `<p class="sev-2" style="margin:0 0 12px;font-size:13px">Last check failed: ${esc(d.last_error)}</p>` : ""}`;
   const failed = d.last_error ? `<span class="sev-2" title="${esc(d.last_error)}">⚠ last check failed</span>` : "";
   if (overview) overview.innerHTML = systemOverview(d);
-  if (!c) { set(`<span class="sub">no data yet</span>${failed}`, head + `<p class="empty">No data yet. Click “Refresh now”.</p>`); return; }
+  if (!c) { set(`<span class="sub">no data yet</span>${failed}`, head + `<p class="empty">No data yet. Click the refresh button.</p>`); return; }
   const counts = {}; c.status.forEach(x => counts[x.severity] = (counts[x.severity] || 0) + 1);
   const major = String(c.typo3 || "").split(".")[0], latest = S.typo3_latest[major];
   const upd = latest && c.typo3 && verCmp(latest, c.typo3) > 0;
@@ -646,11 +650,11 @@ async function loadPipeline(p, pid) {
     const d = await api(`/api/pipeline?project=${encodeURIComponent(p.id)}&id=${pid}`);
     if (!$("#pipe") || $("#view").dataset.project !== p.id) return;
     $("#pipeTitle").innerHTML = `Pipeline #${esc(pid)} · <span class="st s-${esc(d.pipeline.status)}">${esc(d.pipeline.status)}</span>
-      · <a href="${esc(d.pipeline.web_url)}" target="_blank" rel="noopener" style="font-weight:400;font-size:13px">GitLab ↗</a>`;
+      · <a href="${esc(d.pipeline.web_url)}" target="_blank" rel="noopener" title="Open pipeline in GitLab" aria-label="Open pipeline in GitLab">${ic("ext", "sm")}</a>`;
     $("#pipe").innerHTML = `<div class="wrap"><table><thead><tr><th>Stage</th><th>Job</th><th>Status</th><th></th></tr></thead><tbody>
       ${d.jobs.slice().reverse().map(j => `<tr><td>${esc(j.stage)}</td><td>${esc(j.name)}</td>
         <td><span class="st s-${esc(j.status)}">${esc(j.status)}</span></td>
-        <td>${j.status === "manual" ? `<button class="btn sm" data-act="play" data-job="${Number(j.id)}" data-name="${esc(j.name)}">▶ Play</button>` : ""}</td></tr>`).join("")
+        <td>${j.status === "manual" ? `<button class="btn sm" data-act="play" data-job="${Number(j.id)}" data-name="${esc(j.name)}" title="Play ${esc(j.name)}" aria-label="Play ${esc(j.name)}">${ic("play")}</button>` : ""}</td></tr>`).join("")
         || `<tr><td colspan="4" class="empty">No jobs.</td></tr>`}
       </tbody></table></div>
       ${p.production?.ref && d.pipeline.ref === p.ref && d.pipeline.status === "success"
@@ -1133,7 +1137,7 @@ const actions = {
     el.disabled = false;
   },
   async t3mrefresh(el) {
-    el.disabled = true; el.textContent = "Checking…";
+    el.disabled = true; el.classList.add("busy");
     await loadT3m(proj($("#view").dataset.project), T3M_ENVS.find(e => e.env === el.dataset.env), true);
   },
   async projexport(el) {
