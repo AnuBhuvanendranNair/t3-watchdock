@@ -22,6 +22,20 @@ const parseVars = s => Object.fromEntries((s || "").split(",").map(x => x.trim()
   .map(x => { const i = x.indexOf("="); return [x.slice(0, i).trim(), x.slice(i + 1).trim()]; }).filter(([k]) => k));
 const proj = id => S.projects.find(p => p.id === id);
 const pUrl = p => `#/p/${encodeURIComponent(p.id)}`;
+
+/* ---------------- plugins (plugins/<name>, switched on in config.json) ---------------- */
+// A plugin script calls watchdock.register({projectPage(p, view), settingsPage(stack)}); hooks run after each render.
+const PLUGINS = [];
+window.watchdock = {register: hooks => PLUGINS.push(hooks), api, esc, toast, proj: id => proj(id), state: () => S};
+const pluginHook = (name, ...args) => PLUGINS.forEach(h => { try { h[name]?.(...args); } catch (e) { console.error(e); } });
+async function loadPlugins() {
+  let list; try { list = await api("/api/plugins"); } catch { return; }
+  for (const pl of list) {
+    pl.css.forEach(href => document.head.append(Object.assign(document.createElement("link"), {rel: "stylesheet", href})));
+    await Promise.all(pl.js.map(src => new Promise(res =>
+      document.body.append(Object.assign(document.createElement("script"), {src, onload: res, onerror: res})))));
+  }
+}
 const glUrl = p => `${p.gitlab_url}/${p.path}/-/pipelines`;
 const hasCI = p => p.ci !== false;                 // projects without GitLab CI/CD: monitoring only
 // "11.5.2-MariaDB-ubu2404" -> "MariaDB 11.5.2", "8.0.36" -> "MySQL 8.0.36" (full value stays in the tooltip)
@@ -384,6 +398,7 @@ function viewProject(p, pipelineId) {
   $("#view").dataset.project = p.id;
   if (pid) loadPipeline(p, pid);
   T3M_ENVS.forEach(e => loadT3m(p, e));
+  pluginHook("projectPage", p, $("#view"));
 }
 
 function pipelineConfigDetails(config) {
@@ -415,6 +430,7 @@ function viewProjectNoCI(p) {
       <button class="btn danger sm" data-act="del">Remove project</button></div>`;
   $("#view").dataset.project = p.id;
   T3M_ENVS.forEach(e => loadT3m(p, e));
+  pluginHook("projectPage", p, $("#view"));
 }
 
 const SEV = {"-2":"notice", "-1":"info", "0":"ok", "1":"warning", "2":"error"};
@@ -976,6 +992,7 @@ function viewSettings() {
     ev.preventDefault();
     try { await saveEmail(); toast("Email settings saved"); closeAfter(ev); } catch (e) { toast(e.message, true); }
   };
+  pluginHook("settingsPage", $("#view > .stack"));
 }
 async function saveTeams(extra) {
   const f = $("#msform");
@@ -1158,7 +1175,7 @@ document.addEventListener("click", e => {
 });
 
 window.addEventListener("hashchange", render);
-render();
+loadPlugins().finally(render);
 setInterval(async () => {          // refresh list views only when their data changed; never interrupt forms or pipeline view
   if (document.hidden) return;     // background tab: no polling
   const h = location.hash.slice(1) || "/", prevS = JSON.stringify(S), prevSum = JSON.stringify(T3SUM);
