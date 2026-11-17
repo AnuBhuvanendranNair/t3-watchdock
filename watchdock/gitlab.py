@@ -185,6 +185,16 @@ def project_info(gitlab_url, path, ref=""):
             "prod_play": manual_jobs(p, prod) if prod else [], "major": typo3_major(p, ref)}
 
 
+def run_production(project):
+    """Run the production pipeline directly (independent of any staging pipeline)."""
+    require_ci(project)
+    prod = project.get("production") or {}
+    if not prod.get("ref"):
+        raise RuntimeError("No production branch configured for this project")
+    return run_pipeline(project, prod.get("variables", {}), f"manual -> {prod['ref']}",
+                        prod.get("auto_play", []), ref=prod["ref"])
+
+
 def promote(project, source_id):
     """Run the production pipeline, only after a successful staging pipeline."""
     require_ci(project)

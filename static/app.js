@@ -1,7 +1,11 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// Icon from the inline sprite in index.html (Lucide, ISC); decorative, the button carries title + aria-label
+const ic = (name, cls = "") => `<svg class="ic${cls ? " " + cls : ""}" aria-hidden="true" focusable="false"><use href="#i-${name}"/></svg>`;
+// Icon-only button: tooltip and accessible name from one text
+const icBtn = (name, label, attrs = "", cls = "btn sec icon") => `<button type="button" class="${cls}" title="${esc(label)}" aria-label="${esc(label)}" ${attrs}>${ic(name)}</button>`;
 const ACTIVE = ["created","waiting_for_resource","preparing","pending","running","manual","scheduled"];
-let S = null, pollT = null;
+let S = null, pollT = {};
 
 async function api(path, body) {
   const r = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {});
@@ -26,7 +30,7 @@ const pUrl = p => `#/p/${encodeURIComponent(p.id)}`;
 /* ---------------- plugins (plugins/<name>, switched on in config.json) ---------------- */
 // A plugin script calls watchdock.register({projectPage(p, view), settingsPage(stack)}); hooks run after each render.
 const PLUGINS = [];
-window.watchdock = {register: hooks => PLUGINS.push(hooks), api, esc, toast, proj: id => proj(id), state: () => S};
+window.watchdock = {register: hooks => PLUGINS.push(hooks), api, esc, toast, ic, proj: id => proj(id), state: () => S};
 const pluginHook = (name, ...args) => PLUGINS.forEach(h => { try { h[name]?.(...args); } catch (e) { console.error(e); } });
 async function loadPlugins() {
   let list; try { list = await api("/api/plugins"); } catch { return; }
@@ -44,14 +48,14 @@ const dbShort = v => { const m = String(v || "").match(/(\d+\.\d+(?:\.\d+)?)/); 
 const fmt = t => t ? t.replace("T", " ") : "–";
 
 // Theme switch in the header: Auto (system) → Light → Dark; saved per browser
-const THEMES = [{id:"auto", label:"◐ Auto", hint:"follows the system setting"},
-  {id:"light", label:"☀ Light", hint:"always light"}, {id:"dark", label:"☾ Dark", hint:"always dark"}];
+const THEMES = [{id:"auto", icon:"auto", hint:"follows the system setting"},
+  {id:"light", icon:"sun", hint:"always light"}, {id:"dark", icon:"moon", hint:"always dark"}];
 function setTheme(id, save) {
   const root = document.documentElement, t = THEMES.find(x => x.id === id) || THEMES[0];
   if (t.id === "auto") delete root.dataset.theme; else root.dataset.theme = t.id;
   if (save) try { t.id === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", t.id); } catch (e) {}
   const b = $("#themeBtn"), next = THEMES[(THEMES.indexOf(t) + 1) % THEMES.length];
-  b.textContent = t.label; b.title = `Theme: ${t.id} (${t.hint}). Click for ${next.id}.`;
+  b.innerHTML = ic(t.icon); b.title = `Theme: ${t.id} (${t.hint}). Click for ${next.id}.`;
   b.setAttribute("aria-label", b.title);
 }
 setTheme(document.documentElement.dataset.theme || "auto");
@@ -102,7 +106,8 @@ async function refresh() {
 
 /* ---------------- router ---------------- */
 async function render() {
-  clearTimeout(pollT);
+  Object.values(pollT).forEach(clearTimeout);
+  delete $("#view").dataset.pview;
   if (!S) await refresh();
   const [a, b, c, d] = (location.hash.slice(1) || "/").split("/").filter(Boolean);
   const navKey = !a || a === "p" || a === "new" ? "projects" : a;
@@ -178,6 +183,84 @@ async function loadRunStatus() {
   if (Object.values(RUNST).some(r => BUSY.includes(r.status))) loadRunStatus.t = setTimeout(loadRunStatus, 8000);
 }
 
+// Projects page: technology filter (two steps: technology → version), data from the last t3monitor check (T3SUM).
+// Versions are grouped: TYPO3 by major, the rest by product + major.minor. A project matches if production OR staging matches.
+const mm = v => (String(v || "").match(/\d+\.\d+/) || [""])[0];
+const TECH = {
+  typo3: {label: "TYPO3", get: x => { const m = String(x.typo3 || "").match(/^(\d+)\./); return m ? `TYPO3 ${m[1]}` : ""; }},
+  php: {label: "PHP", get: x => mm(x.php) && `PHP ${mm(x.php)}`},
+  db: {label: "Database", get: x => x.db ? `${/mariadb/i.test(x.db) ? "MariaDB" : "MySQL"} ${mm(x.db)}`.trim() : ""},
+  web: {label: "Web server", get: x => { const m = String(x.webserver || "").match(/^([A-Za-z][\w-]*)(?:\/(\d+\.\d+))?/);
+    return m ? `${m[1]}${m[2] ? " " + m[2] : " (version hidden)"}` : ""; }},
+  os: {label: "OS", get: x => { const m = String(x.os || "").match(/^([A-Za-z]+)\s+(\d+\.\d+)?/); return m ? `${m[1]}${m[2] ? " " + m[2] : ""}` : ""; }},
+};
+let techFilter = {tech: "typo3", val: "", open: false};
+const techVals = (pid, tech) => { const x = T3SUM?.[pid] || {};
+  return [...new Set(T3M_ENVS.map(e => x[e.env]).filter(y => y?.has_data).map(TECH[tech].get).filter(Boolean))]; };
+const verDesc = (a, b) => { const n = s => (s.match(/[\d.]+$/) || ["0"])[0].split(".").map(Number), A = n(a), B = n(b);
+  const pa = a.replace(/[\d.]+$/, ""), pb = b.replace(/[\d.]+$/, "");
+  return pa !== pb ? pa.localeCompare(pb) : (B[0] - A[0]) || ((B[1] || 0) - (A[1] || 0)); };
+function paintTechFilter() {   // tabs = technology, chips = "All" + versions with project counts
+  const box = $("#tfChips"); if (!box) return;
+  document.querySelectorAll("[data-act=tftab]").forEach(b => { const on = b.dataset.tech === techFilter.tech;
+    b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1; });
+  const count = new Map();
+  S.projects.forEach(p => techVals(p.id, techFilter.tech).forEach(k => count.set(k, (count.get(k) || 0) + 1)));
+  if (techFilter.val && !count.has(techFilter.val)) techFilter.val = "";
+  // TYPO3 / PHP: the tab already names the product, so the chip shows the version only
+  const short = k => techFilter.tech === "typo3" || techFilter.tech === "php" ? k.replace(/^\S+ /, "") : k;
+  const chip = (v, label, n) => `<button type="button" class="tchip" data-act="tfval" data-v="${esc(v)}" aria-pressed="${techFilter.val === v}"
+    title="${esc(v ? `${v}: ${n} project${n === 1 ? "" : "s"}` : "All projects")}">${esc(label)}${v ? `<span class="tcount">${n}</span>` : ""}</button>`;
+  box.innerHTML = chip("", "All") + [...count.keys()].sort(verDesc).map(k => chip(k, short(k), count.get(k))).join("")
+    + (count.size ? "" : `<span class="sub tchips-empty">${T3SUM ? "No data" : "Loading…"}</span>`);
+  applyTechFilter();
+}
+function applyTechFilter() {
+  const {tech, val} = techFilter, on = !!(tech && val);
+  const show = new Set(on ? S.projects.filter(p => techVals(p.id, tech).includes(val)).map(p => p.id) : []);
+  document.querySelectorAll("#view [data-pid]").forEach(el => { el.hidden = on && !show.has(el.dataset.pid); });
+  if ($("#tfCount")) $("#tfCount").textContent = on ? `${show.size} of ${S.projects.length} projects` : "";
+}
+
+// Refresh buttons with a progress fill (bottom → top). Progress lives here, keyed per button purpose, not in the
+// element: views re-render while a refresh runs (30 s poll, loadT3m), and every render draws the button from this state.
+// Fill = finished tasks + a creep for every task in flight (eases out towards 90 % of its slice), so even a single
+// request rises steadily; the real jump to its slice happens when it finishes. The creep is an estimate, not a measure.
+const PROG = {};                                     // key -> {done, total, failed, running: Map(task index -> start)}
+const progPct = key => { const s = PROG[key]; if (!s) return 0; const now = Date.now();
+  const creep = [...s.running.values()].reduce((a, t0) => a + 0.9 * (1 - Math.exp(-(now - t0) / 2000)), 0);
+  return Math.min(100, Math.round((s.done + creep) / s.total * 100)); };
+function progBtn(key, label, attrs, cls = "btn sec icon") {
+  const on = !!PROG[key];
+  return `<button type="button" class="${cls}${on ? " busy fill" : ""}" data-prog="${esc(key)}" data-tip="${esc(label)}" style="--p:${progPct(key)}%"
+    title="${esc(label)}" aria-label="${esc(label)}" ${attrs}${on ? " disabled" : ""}>${ic("refresh")}</button>`;
+}
+function progPaint(key) {
+  const s = PROG[key];
+  document.querySelectorAll(`[data-prog="${CSS.escape(key)}"]`).forEach(b => {
+    const t = s ? `Refreshing… ${s.done}/${s.total}` : b.dataset.tip;
+    b.disabled = !!s; b.classList.toggle("busy", !!s); b.classList.toggle("fill", !!s);
+    b.style.setProperty("--p", `${progPct(key)}%`); b.title = t; b.setAttribute("aria-label", t);
+  });
+}
+async function runProg(key, tasks, conc = 4) {        // tasks: async functions; returns {total, failed} or null if already running
+  if (PROG[key] || !tasks.length) return null;
+  const st = PROG[key] = {done: 0, total: tasks.length, failed: 0, running: new Map()};
+  progPaint(key);
+  const tick = setInterval(() => progPaint(key), 200);
+  let i = 0;
+  const worker = async () => { while (i < tasks.length) { const n = i++; st.running.set(n, Date.now());
+    try { await tasks[n](); } catch (e) { st.failed++; }
+    st.running.delete(n); st.done++; progPaint(key); } };
+  await Promise.all(Array.from({length: Math.min(conc, tasks.length)}, worker));
+  clearInterval(tick);
+  await new Promise(r => setTimeout(r, 350));        // let the fill reach the top before it resets
+  delete PROG[key]; progPaint(key);
+  return {total: st.total, failed: st.failed};
+}
+
+// Projects page: grid (cards) or list (TYPO3 status table); choice remembered per browser
+const projView = () => { try { return localStorage.getItem("projectsView") === "list" ? "list" : "grid"; } catch (e) { return "grid"; } };
 function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload needed
   const projectsWithRuns = new Set(S.projects_with_runs || []);
   const cards = S.projects.map(p => {
@@ -189,7 +272,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
         ${esc(e.label)}${ready ? "" : " · Key missing"}
       </span>`;
     }).join("");
-    return `<a class="pcard" href="${pUrl(p)}">
+    return `<a class="pcard" data-pid="${esc(p.id)}" href="${pUrl(p)}">
       <div class="name">${esc(p.name)}</div>
       <div class="sub">${esc(p.path || "–")}</div>
       <div class="chips">
@@ -202,7 +285,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
       <div class="srvline" data-srv="${esc(p.id)}"></div>
       <div class="last">${!hasCI(p) ? "Monitoring only" : last ? `<span data-runst="${esc(p.id)}">${runStatusHtml(p.id)}</span> Last run: #${esc(last.pipeline)} · ${esc(fmt(last.t))} · ${esc(last.trigger)}` : "No runs yet"}</div>
     </a>
-    <article class="pcard focus-project">
+    <article class="pcard focus-project" data-pid="${esc(p.id)}">
       <a class="focus-project-link name" href="${pUrl(p)}">
         ${projectsWithRuns.has(p.id) ? `<span class="focus-avatar" data-project="${esc(p.id)}" data-gitlab="${esc(p.gitlab_url)}" aria-hidden="true">${esc(p.name.trim().split(/\s+/u, 2).map(word => Array.from(word)[0] || "").join("").toLocaleUpperCase())}</span>` : ""}
         <span class="focus-project-name">${esc(p.name)}</span><span class="focus-project-arrow" aria-hidden="true">›</span>
@@ -220,10 +303,21 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
   $("#view").innerHTML = `
     <div class="head"><div><h1>Projects</h1><div class="sub" data-secondary-copy>${S.projects.length} project(s) · <span class="srvlegend"><span class="upd">↑</span> TYPO3 update available · <span class="diff">≠</span> staging differs from production</span></div></div>
       <div class="actions">
-        ${S.projects.some(hasCI) ? `<button class="btn" data-act="runall">▶ Run all</button>` : ""}
-        <a class="btn sec" href="#/new">+ New project</a></div></div>
+        ${S.projects.length ? `<div class="seg" role="group" aria-label="Projects view">${[["grid", "Grid view: project cards"], ["list", "List view: TYPO3 status table"]]
+          .map(([v, t]) => `<button type="button" class="seg-b" data-act="pview" data-v="${v}" title="${t}" aria-label="${t}" aria-pressed="${projView() === v}">${ic(v)}</button>`).join("")}</div>` : ""}
+        ${S.projects.length ? `<button type="button" class="btn sec icon${techFilter.open ? " on" : ""}" data-act="tftoggle" title="Filter by technology" aria-label="Filter by technology" aria-expanded="${!!techFilter.open}" aria-controls="tfBar">${ic("filter")}</button>` : ""}
+        ${S.projects.some(p => T3M_ENVS.some(e => t3mOn(p, e))) ? progBtn("home", "Refresh TYPO3 status of all monitored projects", `data-act="t3mrefreshhome"`) : ""}
+        ${S.projects.some(hasCI) ? icBtn("play", "Run all: start the main pipeline (not production) of every CI/CD project", `data-act="runall"`, "btn icon") : ""}
+        <a class="btn sec icon" href="#/new" title="New project" aria-label="New project">${ic("plus")}</a></div></div>
+    ${S.projects.length ? `<div class="tfilter" id="tfBar" role="search" aria-label="Filter projects by technology"${techFilter.open ? "" : " hidden"}>
+      <div class="ttabs" role="tablist" aria-label="Technology">${Object.entries(TECH).map(([k, t]) =>
+        `<button type="button" class="ttab" role="tab" data-act="tftab" data-tech="${k}" aria-controls="tfChips" aria-selected="${techFilter.tech === k}"${techFilter.tech === k ? "" : ' tabindex="-1"'}>${t.label}</button>`).join("")}</div>
+      <div class="tchips-row"><div class="tchips" id="tfChips" role="tabpanel" aria-label="Version"></div>
+        <span class="sub" id="tfCount" aria-live="polite"></span></div></div>` : ""}
     ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">No projects yet. <a href="#/new">Create one</a>.</div>`}
     ${S.projects.length ? `<div class="card full" id="t3sum" style="margin-top:18px"><h2>TYPO3 status – Production &amp; Staging</h2><p class="empty">Loading…</p></div>` : ""}`;
+  $("#view").dataset.pview = projView();
+  paintTechFilter();
   if (document.documentElement.dataset.style === "focus") loadFocusAvatars();
   paintRunStatus();
   if (S.runs.length) loadRunStatus();          // server caches it (8 s active, 5 min finished)
@@ -290,7 +384,7 @@ async function loadT3mSummary(pre) {
   const rows = projects.map(({p, a, b, checked}, index) => {
     const diff = a?.typo3 && b?.typo3 && a.typo3 !== b.typo3;
     const pdiff = a?.php && b?.php && a.php !== b.php;
-    return `<tr data-rank="${ranks.get(p.id)}" data-original-order="${index}"><td class="focus-row-number">${ranks.get(p.id)}</td><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
+    return `<tr data-pid="${esc(p.id)}" data-rank="${ranks.get(p.id)}" data-original-order="${index}"><td class="focus-row-number">${ranks.get(p.id)}</td><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
       ${[[a, ver(a)], [b, ver(b, a)]].map(([x, version]) => `<td class="${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${version}
         ${x?.has_data ? `<div class="focus-env-health">${ew(x)}</div>` : ""}</td>
         <td class="overview-health ${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${ew(x)}</td>`).join("")}
@@ -311,6 +405,7 @@ async function loadT3mSummary(pre) {
       <th scope="col" class="overview-health">Stg E/W</th>
       <th title="Oldest check of the configured instances">Last check</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   updateOverviewOrder();
+  paintTechFilter();
   box.querySelector(".overview-options").onchange = ({target}) => {
     overviewOptions.sort = target.value;
     loadT3mSummary(d);
@@ -330,42 +425,88 @@ const systemOverviewCard = () => `
     <section class="card system-overview">
       <div class="system-overview-heading">
         <h2>System overview</h2>
-        <button type="button" class="btn sec sm scroll-bottom" data-act="scrollbottom"
-          aria-label="Scroll to bottom" title="Scroll to bottom"><span aria-hidden="true">↓</span></button>
       </div>
       <div class="system-environments">
         ${T3M_ENVS.map(e => `<section>
-          <h3>${esc(e.label)}</h3>
+          <div class="system-env-head"><h3>${esc(e.label)}</h3>
+            ${icBtn("details", `${e.label}: TYPO3 status details`, `data-act="t3mopen" data-env="${e.env}"`, "btn sec sm icon")}</div>
           <div class="system-details" id="system-${e.env}" aria-live="polite">Loading…</div>
         </section>`).join("")}
       </div>
-    </section>`;
+    </section>
+    ${T3M_ENVS.map(e => `<dialog class="t3dlg" id="t3dlg-${e.env}" aria-label="TYPO3 status – ${esc(e.label)}" tabindex="-1" autofocus>
+      <div id="t3m-${e.env}" class="t3m"><div class="t3h"><div><div class="t3h-k">TYPO3 status</div><h2 class="t3h-t">${esc(e.label)}</h2></div>
+        <div class="t3h-a">${icBtn("close", "Close", `data-act="t3mclose"`, "btn sec icon t3sq")}</div></div><p class="empty">Loading…</p></div></dialog>`).join("")}`;
+
+// Long date "17 Nov 2026", time "17:14", schedule "Runs Mon–Fri at 15:17" (from "daily at 15:17 (Mon, Tue, Wed, Thu, Fri)")
+const dlong = t => { const x = new Date(t); return Number.isNaN(x.getTime()) ? fmt(t)
+  : x.toLocaleDateString("en-GB", {day: "numeric", month: "short", year: "numeric"}); };
+const hm = t => fmt(t).slice(11, 16);
+function runsTxt(sch) {
+  const m = /^daily at (\d\d:\d\d) \((.+)\)$/.exec(sch || "");
+  if (!m) return sch ? `Runs ${sch}` : "No schedule";
+  if (m[2] === "every day") return `Runs daily at ${m[1]}`;
+  const D = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], ds = m[2].split(", "), ix = ds.map(x => D.indexOf(x));
+  const range = ds.length > 2 && ix.every((v, i) => v >= 0 && (i === 0 || v === ix[i - 1] + 1));
+  return `Runs ${range ? `${ds[0]}–${ds[ds.length - 1]}` : ds.join(", ")} at ${m[1]}`;
+}
+// "Recent runs" row: environment tag, pipeline number, trigger (icon + short text), relative time (exact time in tooltip)
+const ago = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000));
+  if (Number.isNaN(m)) return fmt(t);
+  if (m < 1) return "just now"; if (m < 60) return `${m} min ago`; if (m < 1440) return `${Math.floor(m / 60)} h ago`;
+  const d = Math.floor(m / 1440); return d === 1 ? "yesterday" : d < 7 ? `${d} days ago` : fmt(t).slice(0, 10); };
+function runTrigger(t = "") {
+  let m;
+  if ((m = t.match(/^promote #(\d+) -> /))) return ["play", `from #${m[1]}`, `Promoted from staging pipeline #${m[1]}`];
+  if ((m = t.match(/^TYPO3 (\S+) -> (\S+)$/))) return ["update", `TYPO3 ${m[1]} → ${m[2]}`, `Automatic TYPO3 update ${m[1]} → ${m[2]}`];
+  if (t === "manual TYPO3 update") return ["update", "TYPO3 update", "TYPO3 update, started by hand"];
+  if (/^manual( -> |$)/.test(t)) return ["play", "manual", "Started by hand"];
+  return ["play", t, t];
+}
+function runRow(p, r, prod, on) {
+  const [icon, txt, tip] = runTrigger(r.trigger);
+  return `<a href="${pUrl(p)}/pl/${Number(r.pipeline)}" class="run-row${on ? " on" : ""}" title="${esc(tip)} · ${esc(fmt(r.t))}">
+    <span class="env-tag ${prod ? "prod" : "stg"}">${prod ? "PROD" : "STG"}</span>
+    <code class="run-id">#${esc(r.pipeline)}</code>
+    <span class="run-trig">${ic(icon, "sm")}${esc(txt)}</span>
+    <time class="sub" datetime="${esc(r.t)}">${esc(ago(r.t))}</time></a>`;
+}
 
 function viewProject(p, pipelineId) {
   if (!hasCI(p)) return viewProjectNoCI(p);
   const a = p.auto_typo3 || {};
   const runs = S.runs.filter(r => r.project === p.id);
+  // one pipeline card per environment; a run selected in "Recent runs" replaces the latest run of its environment
+  const prodRef = p.production?.ref || "";
+  const isProd = r => prodRef && (r.ref ? r.ref === prodRef : / -> /.test(r.trigger || ""));
+  const sel = pipelineId && runs.find(r => r.pipeline === pipelineId);
+  const pick = prod => (sel && !!isProd(sel) === prod ? sel : runs.find(r => !!isProd(r) === prod))?.pipeline
+    || (pipelineId && !sel && !prod ? pipelineId : null);
+  const envs = [{slot: "stg", label: "Staging", ref: p.ref, mode: "normal", pid: pick(false)}];
+  if (prodRef) envs.push({slot: "prod", label: "Production", ref: prodRef, mode: "production", pid: pick(true)});
   const pid = pipelineId || (runs[0] && runs[0].pipeline);
   $("#view").innerHTML = `
     <div class="crumb"><a href="#/">Projects</a> / ${esc(p.name)}</div>
     <div class="head">
       <div><h1>${esc(p.name)}</h1>
-        <div class="sub">${esc(p.path)} · <code>${esc(p.ref)}</code> · <a href="${esc(glUrl(p))}" target="_blank" rel="noopener">Open in GitLab ↗</a></div></div>
+        <div class="sub">${esc(p.path)} · <code>${esc(p.ref)}</code> · <a href="${esc(glUrl(p))}" target="_blank" rel="noopener">GitLab ${ic("ext", "sm")}</a></div></div>
       <div class="actions">
-        <button class="btn" data-act="run" data-mode="normal">▶ Run pipeline</button>
-        ${a.enabled ? `<button class="btn sec" data-act="run" data-mode="update">Run TYPO3 update</button>` : ""}
-        <button class="btn sec" data-act="updsend" title="Send ready-to-run commands for pending extension updates via Teams / email">Send update commands</button>
-        <a class="btn sec" href="${pUrl(p)}/edit">Edit</a>
+        ${T3M_ENVS.some(e => t3mOn(p, e)) ? progBtn(`proj:${p.id}`, "Refresh TYPO3 status of all monitored environments", `data-act="t3mrefreshall"`) : ""}
+        ${a.enabled ? icBtn("update", "Run TYPO3 update (staging pipeline)", `data-act="run" data-mode="update"`) : ""}
+        ${icBtn("send", "Send update commands: ready-to-run commands for pending extension updates via Teams / email", `data-act="updsend"`)}
+        <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
     </div>
     ${systemOverviewCard()}
     <div class="two">
       <div class="stack">
-        <div class="card"><h2 id="pipeTitle">${pid ? "Pipeline #" + esc(pid) : "Pipeline"}</h2>
-          <div id="pipe">${pid ? `<p class="empty">Loading…</p>` : `<p class="empty">No pipeline started from the launcher yet. Click “Run pipeline”.</p>`}</div></div>
+        ${envs.map(e => `<div class="card pipe-env pipe-${e.slot}">
+          <div class="pipe-head"><h2 title="Branch: ${esc(e.ref)}"><span class="env-l">${e.label}</span>${e.ref.toLowerCase() !== e.label.toLowerCase() ? ` <code>${esc(e.ref)}</code>` : ""}</h2>
+            ${icBtn("play", `Run ${e.label.toLowerCase()}`, `data-act="run" data-mode="${e.mode}"`, `btn icon${e.slot === "prod" ? " prod" : ""}`)}</div>
+          <div class="pipe-title" id="pipeTitle-${e.slot}">${e.pid ? "Pipeline #" + esc(e.pid) : ""}</div>
+          <div id="pipe-${e.slot}">${e.pid ? `<p class="empty">Loading…</p>` : `<p class="empty">No ${e.label.toLowerCase()} pipeline started from the launcher yet.</p>`}</div></div>`).join("")}
         <div class="card"><h2>Recent runs</h2><div class="runs">
-          ${runs.map(r => `<a href="${pUrl(p)}/pl/${Number(r.pipeline)}" class="${r.pipeline === pid ? "on" : ""}">
-            <span>#${esc(r.pipeline)} · ${esc(r.trigger)}</span><span class="sub">${esc(fmt(r.t))}</span></a>`).join("")
+          ${runs.map(r => runRow(p, r, !!isProd(r), r.pipeline === pid)).join("")
             || `<p class="empty">No runs yet.</p>`}
         </div></div>
       </div>
@@ -393,10 +534,9 @@ function viewProject(p, pipelineId) {
           <button class="btn danger sm" data-act="del">Remove project</button></div>
       </div>
     </div>
-    ${T3M_ENVS.map(e => `<details class="card full t3env" id="t3m-${e.env}"><summary>TYPO3 status – ${esc(e.label)}
-      <span class="t3meta sub">Loading…</span></summary></details>`).join("")}`;
+`;
   $("#view").dataset.project = p.id;
-  if (pid) loadPipeline(p, pid);
+  envs.forEach(e => e.pid && loadPipeline(p, e.pid, e.slot));
   T3M_ENVS.forEach(e => loadT3m(p, e));
   pluginHook("projectPage", p, $("#view"));
 }
@@ -418,13 +558,13 @@ function viewProjectNoCI(p) {
       <div><h1>${esc(p.name)}</h1>
         <div class="sub"><span class="chip">no CI/CD</span>${p.path ? ` · ${esc(p.path)}` : ""}${p.ref ? ` · <code>${esc(p.ref)}</code>` : ""}</div></div>
       <div class="actions">
-        <button class="btn sec" data-act="updsend" title="Send pending extension updates via Teams / email${p.ref ? " (with ready-to-run commands)" : ""}">Send update list</button>
-        <a class="btn sec" href="${pUrl(p)}/edit">Edit</a>
+        ${T3M_ENVS.some(e => t3mOn(p, e)) ? progBtn(`proj:${p.id}`, "Refresh TYPO3 status of all monitored environments", `data-act="t3mrefreshall"`) : ""}
+        ${icBtn("send", `Send update list: pending extension updates via Teams / email${p.ref ? " (with ready-to-run commands)" : ""}`, `data-act="updsend"`)}
+        <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
     </div>
     ${systemOverviewCard()}
-    ${T3M_ENVS.map(e => `<details class="card full t3env" id="t3m-${e.env}"><summary>TYPO3 status – ${esc(e.label)}
-      <span class="t3meta sub">Loading…</span></summary></details>`).join("")}
+
     <div class="card danger-zone" style="margin-top:18px"><h2>Danger zone</h2>
       <p class="sub" style="margin:0 0 10px">Removes the project from the launcher only.</p>
       <button class="btn danger sm" data-act="del">Remove project</button></div>`;
@@ -439,32 +579,31 @@ const verCmp = (a, b) => { const x = String(a).split("."), y = String(b).split("
   for (let i = 0; i < 3; i++) { const d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0); if (d) return d; } return 0; };
 
 // Security section of an instance (result of the scheduled "PHP version & security advisories" task)
-function secBlock(sec) {
-  const task = S.scheduler.find(t => t.id === "security");
-  if (!sec) return `<details><summary>Security · not checked yet</summary><p class="empty">Runs with the
-    <a href="#/scheduler">${esc(task?.name || "security")}</a> task (${esc(task?.cfg.enabled === false ? "off" : task?.schedule || "–")}).</p></details>`;
+function secBody(sec) {
   const adv = sec.advisories || [], php = sec.php;
-  const meta = [adv.length ? `<span class="sev-2">${adv.length} advisor${adv.length === 1 ? "y" : "ies"}</span>` : "no advisories",
-    php?.severity ? `<span class="sev-${php.severity}">${esc(php.text)}</span>` : ""].filter(Boolean).join(" · ");
-  return `<details${adv.length || php?.severity ? " open" : ""}><summary>Security · ${meta}</summary>
-    <p class="sub" style="margin:0 0 8px">${php ? esc(php.text) : "PHP version unknown"} · checked ${esc(fmt(sec.checked))}</p>
+  return `<p class="sub" style="margin:0 0 8px">${php ? esc(php.text) : "PHP version unknown"} · checked ${esc(fmt(sec.checked))}</p>
     ${adv.length ? `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Package</th><th>Installed</th><th>Advisory</th><th>Affected</th></tr></thead><tbody>
       ${adv.map(a => `<tr><td><span class="badge ${a.severity === "low" ? "sev-1" : "sev-2"}">${esc(a.severity || "?")}</span></td><td><code>${esc(a.package)}</code></td>
-        <td>${esc(a.version)}</td><td>${/^https?:\/\//.test(a.link || "") ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ↗</a>` : esc(a.title)}${a.cve ? ` <span class="sub">${esc(a.cve)}</span>` : ""}</td>
+        <td>${esc(a.version)}</td><td>${/^https?:\/\//.test(a.link || "") ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ${ic("ext", "sm")}</a>` : esc(a.title)}${a.cve ? ` <span class="sub">${esc(a.cve)}</span>` : ""}</td>
         <td class="sub">${esc(a.affected)}</td></tr>`).join("")}</tbody></table></div>`
-      : `<p class="empty">No known security advisories for TYPO3 core and the public extensions.</p>`}</details>`;
+      : `<p class="empty">No known security advisories for TYPO3 core and the public extensions.</p>`}`;
 }
 
 async function loadT3m(p, e, refreshNow) {
   const id = "#t3m-" + e.env, box = $(id); if (!box) return;
   const overview = $("#system-" + e.env);
   const url = p[e.cfg]?.url;
-  // Collapsible section: heading + compact status in the summary, details in the body (open state is kept on re-render)
-  const set = (meta, body) => box.innerHTML = `<summary>TYPO3 status – ${esc(e.label)} <span class="t3meta">${meta}</span></summary>
+  // Modal content (dialog opened from the System overview tile): header (site, env, meta line, refresh/close), then body
+  const set = (meta, body, title) => box.innerHTML = `<div class="t3h"><div>
+      <div class="t3h-k">TYPO3 status</div>
+      <h2 class="t3h-t">${esc(title || p.name)} <span class="t3pill">${esc(e.label)}</span></h2>
+      ${meta ? `<div class="t3h-m">${meta}</div>` : ""}</div>
+    <div class="t3h-a">${t3mOn(p, e) ? progBtn(`t3m:${p.id}:${e.env}`, `Refresh ${e.label} status now`, `data-act="t3mrefresh" data-env="${e.env}"`, "btn sec icon t3sq") : ""}
+      ${icBtn("close", "Close", `data-act="t3mclose"`, "btn sec icon t3sq")}</div></div>
     <div class="t3body">${body}</div>`;
   if (!t3mOn(p, e)) {
     if (overview) overview.textContent = "Monitoring not configured";
-    set(`<span class="sub">not configured</span>`, `<p class="empty">Add the ${esc(e.label)} t3monitor URL and key under
+    set("", `<p class="empty">Add the ${esc(e.label)} t3monitor URL and key under
       <a href="${pUrl(p)}/edit">Edit</a> to see TYPO3 version, extensions, status checks and their history.</p>`);
     return;
   }
@@ -473,18 +612,21 @@ async function loadT3m(p, e, refreshNow) {
                        : await api(`/api/t3monitor?project=${encodeURIComponent(p.id)}&env=${e.env}`); }
   catch (err) {
     if (overview) overview.textContent = "System status unavailable";
-    set(`<span class="sev-2">error</span>`, `<p class="empty">Error: ${esc(err.message)}</p>`);
+    set("", `<div class="t3alert err"><span class="t3dot"></span><div><b>Status unavailable</b><div class="sub">${esc(err.message)}</div></div></div>`);
     return;
   }
   if ($(id) !== box || $("#view").dataset.project !== p.id) return;
-  const c = d.current, head = `<div class="head" style="margin-bottom:12px"><div>
-      <div class="sub">${c ? esc(c.site_name) + " · " : ""}<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)} ↗</a>
-      · last check ${esc(fmt(d.last_check))} · <a href="#/scheduler">schedule: ${esc(S.scheduler.find(t => t.id === "t3monitor")?.cfg.enabled === false ? "off" : S.scheduler.find(t => t.id === "t3monitor")?.schedule)}</a></div></div>
-      <button class="btn sec sm" data-act="t3mrefresh" data-env="${e.env}">↻ Refresh now</button></div>
-    ${d.last_error ? `<p class="sev-2" style="margin:0 0 12px;font-size:13px">Last check failed: ${esc(d.last_error)}</p>` : ""}`;
-  const failed = d.last_error ? `<span class="sev-2" title="${esc(d.last_error)}">⚠ last check failed</span>` : "";
-  if (overview) overview.innerHTML = systemOverview(d);
-  if (!c) { set(`<span class="sub">no data yet</span>${failed}`, head + `<p class="empty">No data yet. Click “Refresh now”.</p>`); return; }
+  const c = d.current;
+  const sch = S.scheduler.find(t => t.id === "t3monitor");
+  let host = url; try { host = new URL(url).host.replace(/^www\./, ""); } catch {}
+  const meta = [`<a href="${esc(url)}" target="_blank" rel="noopener">${esc(host)} ${ic("ext", "sm")}</a>`,
+    d.last_check ? `<span title="${esc(fmt(d.last_check))}">Checked ${esc(dlong(d.last_check))}, ${esc(hm(d.last_check))}</span>` : "Not checked yet",
+    `<a href="#/scheduler" class="t3h-sch">${esc(sch?.cfg.enabled === false ? "Schedule off" : runsTxt(sch?.schedule))}</a>`].join(`<span class="t3sep">·</span>`);
+  const title = c?.site_name || `${p.name} – ${e.label}`;
+  const failedAlert = d.last_error ? `<div class="t3alert err"><span class="t3dot"></span><div><b>Last check failed</b>
+    <div class="sub">${esc(d.last_error)}${c ? " · showing the last successful check" : ""}</div></div></div>` : "";
+  if (overview) overview.innerHTML = systemOverview(d, e.env);
+  if (!c) { set(meta, failedAlert + `<p class="empty">No data yet. Click the refresh button.</p>`, title); return; }
   const counts = {}; c.status.forEach(x => counts[x.severity] = (counts[x.severity] || 0) + 1);
   const major = String(c.typo3 || "").split(".")[0], latest = S.typo3_latest[major];
   const upd = latest && c.typo3 && verCmp(latest, c.typo3) > 0;
@@ -499,27 +641,43 @@ async function loadT3m(p, e, refreshNow) {
     : !("latest" in x) ? `<span class="sub">not checked yet</span>`
     : x.latest === null ? `<span class="sub" title="Package not found on Packagist">not on Packagist</span>`
     : x.latest === "" ? `<span class="sub">no compatible release</span>` : `<span class="sub">up to date</span>`;
-  const row = x => `<tr><td>${sevBadge(x.severity)}</td><td>${esc(x.group)}</td><td><b>${esc(x.title)}</b>
+  const nn = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const errs = counts[2] || 0, warns = counts[1] || 0, pass = counts[0] || 0, total = c.status.length;
+  const tone = errs ? "err" : warns ? "warn" : "ok";
+  const alert = failedAlert || (errs || warns
+    ? `<div class="t3alert ${tone}"><span class="t3dot"></span><div><b>${[errs && nn(errs, "error"), warns && nn(warns, "warning")].filter(Boolean).join(" and ")} need${errs + warns === 1 ? "s" : ""} attention</b>
+        <div class="sub">${pass} of ${total} checks passing</div></div>
+        <button type="button" class="t3alert-b" data-act="t3review">Review problems</button></div>`
+    : `<div class="t3alert ok"><span class="t3dot"></span><div><b>All checks passing</b><div class="sub">${pass} of ${total} checks passing</div></div></div>`);
+  // security (scheduled task): stat + optional row with the advisories
+  const sec = d.security, adv = sec?.advisories || [], php = sec?.php;
+  const secStat = !sec ? ["–", "Not checked yet", "sub"]
+    : adv.length ? ["At risk", nn(adv.length, "advisory").replace("advisorys", "advisories"), "sev-2"]
+    : php?.severity ? ["Clean", php.text, `sev-${php.severity}`] : ["Clean", "No advisories", "sev0"];
+  const stat = (k, v, sub, cls = "sub") => `<div class="t3stat"><div class="t3stat-k">${k}</div><div class="t3stat-v">${v}</div><div class="${cls}">${sub}</div></div>`;
+  const [dbN, ...dbV] = dbShort(c.db).split(" "), [webN, webV] = String(c.webserver || "").split("/"), [osN, ...osV] = String(c.os || "").split(" ");
+  const chip = (n, v, full) => n ? `<span class="t3chip" title="${esc(full || "")}">${esc(n)} <b>${esc(v || "")}</b></span>` : "";
+  const row = (cls, dot, label, rmeta, body) => `<details class="t3row ${cls}"><summary><span class="t3dot ${dot}"></span><span class="t3row-l">${label}</span>
+      <span class="t3row-m">${rmeta}</span>${ic("chev", "t3chev")}</summary><div class="t3row-b">${body}</div></details>`;
+  const trow = x => `<tr><td>${sevBadge(x.severity)}</td><td>${esc(x.group)}</td><td><b>${esc(x.title)}</b>
       ${x.message ? `<div class="msg">${esc(x.message)}</div>` : ""}</td><td>${esc(x.value)}</td></tr>`;
-  set(`<b>${esc(c.typo3 || "?")}</b>${upd ? `<span class="sev-1">↑ ${esc(latest)}</span>` : ""}
-      ${c.php ? `<span class="sub">PHP ${esc(c.php)}</span>` : ""}
-      <span class="badge ${counts[2] ? "sev-2" : "sev0"}">${counts[2] || 0} error${counts[2] === 1 ? "" : "s"}</span>
-      <span class="badge ${counts[1] ? "sev-1" : "sev0"}">${counts[1] || 0} warning${counts[1] === 1 ? "" : "s"}</span>
-      ${updExt.length ? `<span class="badge" style="color:var(${majExt.length ? "--run" : "--acc"})">${esc(updTxt.replace("update", "ext update"))}</span>` : ""}
-      <span class="sub">checked ${esc(fmt(d.last_check))}</span>${failed}`, head + `
-    <div class="kpis">
-      <div class="kpi"><div class="sub">TYPO3</div><div class="v">${esc(c.typo3 || "?")}</div>
-        <div class="sub ${upd ? "sev-1" : "sev0"}">${latest ? (upd ? `update available: ${esc(latest)}` : `latest (${esc(latest)})`) : "latest unknown"}</div></div>
-      <div class="kpi"><div class="sub">Errors</div><div class="v sev-2">${counts[2] || 0}</div></div>
-      <div class="kpi"><div class="sub">Warnings</div><div class="v sev-1">${counts[1] || 0}</div></div>
-      <div class="kpi"><div class="sub">OK checks</div><div class="v sev0">${counts[0] || 0}</div></div>
-      <div class="kpi"><div class="sub">Extensions</div><div class="v">${exts.length}</div>${local.length ? `<div class="sub">+ ${local.length} local (hidden)</div>` : ""}
-        ${updExt.length ? `<div class="sub ${majExt.length ? "sev-1" : ""}" style="${majExt.length ? "" : "color:var(--acc)"}">${esc(updTxt)}</div>` : ""}</div>
-      <div class="kpi"><div class="sub">Unchanged since</div><div class="v" style="font-size:14px">${esc(fmt(d.since))}</div></div>
+  const checksTable = list => `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Area</th><th>Check</th><th>Value</th></tr></thead>
+      <tbody>${list.map(trow).join("")}</tbody></table></div>`;
+  const updRows = d.updates || [];
+  set(meta, `${alert}
+    <div class="t3stats">
+      ${stat("TYPO3", esc(c.typo3 || "?"), latest ? (upd ? `Update available: ${esc(latest)}` : "Latest version") : "Latest unknown", latest ? (upd ? "sev-1" : "sev0") : "sub")}
+      ${stat("Security", secStat[0], esc(secStat[1]), secStat[2])}
+      ${stat("Extensions", exts.length, updExt.length ? esc(updTxt) : local.length ? `+ ${local.length} local, hidden` : "No updates", updExt.length ? "sev-1" : "sub")}
+      ${stat("Unchanged since", d.since ? esc(hm(d.since)) : "–", d.since ? esc(dlong(d.since)) : "", "sub")}
     </div>
-    <div class="srv">${[["PHP", c.php], ["Database", c.db], ["Web server", c.webserver], ["OS", c.os]]
-      .map(([k, val]) => `<div><div class="sub">${k}</div><div class="srv-v">${esc(val || "–")}</div></div>`).join("")}</div>
-    <details><summary>Extensions (${exts.length})${updTxt ? ` · ${esc(updTxt)}` : ""}</summary>
+    <div class="t3chips">${chip("PHP", c.php, c.php)}${chip(dbN, dbV.join(" "), c.db)}${chip(webN, webV, c.webserver)}${chip(osN, osV.join(" "), c.os)}</div>
+    <div class="t3rows">
+      ${row("t3-problems", problems.length ? tone : "", "Problems", problems.length ? [errs && nn(errs, "error"), warns && nn(warns, "warning")].filter(Boolean).join(" · ") : "None",
+        problems.length ? checksTable(problems) : `<p class="empty">No errors or warnings.</p>`)}
+      ${sec && (adv.length || php?.severity) ? row("", adv.length ? "err" : `sev${php.severity}`, "Security", adv.length ? secStat[1] : esc(php.text), secBody(sec)) : ""}
+      ${row("", "", "All status checks", total, checksTable(c.status.slice().sort((a, b) => b.severity - a.severity)))}
+      ${row("", updExt.length ? "warn" : "", "Extensions", `${exts.length}${updTxt ? ` · ${esc(updTxt)}` : ""}`, `
       ${local.length ? `<label class="check" style="margin-bottom:8px"><input type="checkbox" class="showLocal"> Show local extensions (${local.length}): ${esc(local.map(([k]) => k).join(", "))}</label>` : ""}
       <div class="wrap"><table>
       <thead><tr><th>Extension</th><th>Title</th><th>Version</th><th>Latest</th><th>Composer package</th></tr></thead><tbody>
@@ -528,19 +686,13 @@ async function loadT3m(p, e, refreshNow) {
           data-installed="${esc(e.version)}" data-major="${e.update && e.major ? 1 : ""}" title="Click to show the changelog${e.update ? " of " + esc(e.latest) : ""}"` : ""}>
         <td>${!e.local && e.composer ? `<span class="tw">▸</span>` : ""}<code>${esc(k)}</code>${e.local ? ` <span class="chip">local</span>` : ""}</td>
         <td>${esc(e.title)}</td><td>${esc(e.version)}</td><td>${latestCell(e)}</td><td>${esc(e.composer)}</td></tr>`).join("")}
-      </tbody></table></div></details>
-    ${secBlock(d.security)}
-    <details><summary>Problems (${problems.length ? `${counts[2] || 0} error${counts[2] === 1 ? "" : "s"}, ${counts[1] || 0} warning${counts[1] === 1 ? "" : "s"}` : "none"})</summary>
-      ${problems.length ? `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Area</th><th>Check</th><th>Value</th></tr></thead>
-      <tbody>${problems.map(row).join("")}</tbody></table></div>` : `<p class="empty">No errors or warnings.</p>`}</details>
-    <details><summary>All status checks (${c.status.length})</summary><div class="wrap"><table class="checks">
-      <thead><tr><th>Severity</th><th>Area</th><th>Check</th><th>Value</th></tr></thead>
-      <tbody>${c.status.slice().sort((a, b) => b.severity - a.severity).map(row).join("")}</tbody></table></div></details>
-    ${updHistory(d.updates || [])}
-    <details><summary>History (${d.history.length} change${d.history.length === 1 ? "" : "s"})</summary><ul class="tl">
+      </tbody></table></div>`)}
+      ${row("upd-hist", "", "Update history", updRows.length ? nn(updRows.length, "update") : "None yet", updHistoryBody(updRows))}
+      ${row("", "", "Change history", nn(d.history.length, "change"), `<ul class="tl">
       ${d.history.map(h => `<li><div class="when">${esc(fmt(h.t))}${h.last !== h.t ? ` – seen until ${esc(fmt(h.last))}` : ""} · TYPO3 ${esc(h.typo3 || "?")}</div>
         <ul>${h.changes.map(x => `<li>${esc(x)}</li>`).join("")}</ul></li>`).join("")}
-    </ul></details>`);
+    </ul>`)}
+    </div>`, title);
   box.querySelectorAll("tr[data-ext]").forEach(tr => tr.onclick = () => toggleChangelog(tr));
   const uh = box.querySelector("details.upd-hist");
   if (uh) uh.ontoggle = () => uh.open && loadReleaseInfo(uh);
@@ -548,7 +700,7 @@ async function loadT3m(p, e, refreshNow) {
   if (sl) sl.onchange = () => box.querySelectorAll("tr.local").forEach(r => r.hidden = !sl.checked);
 }
 
-function systemOverview({current, last_check, last_error}) {
+function systemOverview({current, last_check, last_error}, env) {
   const check = last_error ? `<span class="sev-2" title="${esc(last_error)}">Last check failed</span>`
     : last_check ? `Checked ${esc(fmt(last_check))}` : "";
   if (!current) return check || "No checks yet";
@@ -557,9 +709,12 @@ function systemOverview({current, last_check, last_error}) {
   const errors = current.status.filter(item => item.severity === 2).length;
   const warnings = current.status.filter(item => item.severity === 1).length;
   return `<dl>${versions.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "–")}</dd></div>`).join("")}</dl>
-    <div class="system-health">
-      <span class="${errors ? "sev-2" : "sub"}">${errors} errors</span>
-      <span class="${warnings ? "sev-1" : "sub"}">${warnings} warnings</span>
+    <div class="system-health">${errors || warnings
+      ? [["err", "sev-2", errors, "error"], ["warn", "sev-1", warnings, "warning"]].map(([i, cls, n, w]) => {
+          const t = `${n} ${w}${n === 1 ? "" : "s"}${n ? " – show details" : ""}`;
+          return `<button type="button" class="hchip ${n ? cls : "zero"}" data-act="t3mopen" data-env="${env}" title="${t}" aria-label="${t}">${ic(i)}<b>${n}</b></button>`;
+        }).join("")
+      : `<span class="hchip sev0" title="No errors or warnings">${ic("ok")}<b>OK</b></span>`}
     </div>
     ${check ? `<div class="system-check sub">${check}</div>` : ""}`;
 }
@@ -591,15 +746,15 @@ function mdRender(md, base) {
 // Update history: TYPO3 / extension version changes between t3monitor snapshots (newest first)
 const dmy = s => s ? s.slice(0, 10).split("-").reverse().join(".") : "";
 const UPD_ICON = {updated: ["↻", "updated"], added: ["+", "added"], removed: ["✖", "removed"]};
-function updHistory(rows) {
-  if (!rows.length) return `<details class="upd-hist"><summary>Update history (none yet)</summary><p class="empty">No version changes recorded since the first check.</p></details>`;
-  return `<details class="upd-hist"><summary>Update history (${rows.length})</summary><div class="wrap"><table class="upd-table">
+function updHistoryBody(rows) {
+  if (!rows.length) return `<p class="empty">No version changes recorded since the first check.</p>`;
+  return `<div class="wrap"><table class="upd-table">
     <thead><tr><th>Last change</th><th>Old version</th><th></th><th>Inst. version</th><th>Extension key</th><th>Name</th><th>Available since</th><th>Description</th></tr></thead><tbody>
     ${rows.map(r => { const [ic, lbl] = UPD_ICON[r.action]; const ver = r.new || r.old;
       return `<tr class="${r.core ? "core" : ""} ${r.action}" ${r.composer && ver ? `data-composer="${esc(r.composer)}" data-version="${esc(ver)}" data-core="${r.core ? 1 : ""}"` : ""}>
       <td>${esc(dmy(r.t))}</td><td>${esc(r.old || "–")}</td><td class="act" title="${lbl}">${ic}</td><td>${esc(r.new || "–")}</td>
       <td><code>${esc(r.key)}</code></td><td>${esc(r.title)}</td><td class="rel-time"></td><td class="rel-sum"></td></tr>`; }).join("")}
-    </tbody></table></div><p class="sub" style="margin:6px 0 0">Recorded from t3monitor checks. Available since = release date of the installed version (removed: of the old version) on Packagist; description = first changelog line (GitHub/GitLab).</p></details>`;
+    </tbody></table></div><p class="sub" style="margin:6px 0 0">Recorded from t3monitor checks. Available since = release date of the installed version (removed: of the old version) on Packagist; description = first changelog line (GitHub/GitLab).</p>`;
 }
 async function loadReleaseInfo(det) {
   if (det.dataset.loaded) return;
@@ -640,23 +795,52 @@ async function toggleChangelog(tr) {
   } catch (e) { box.innerHTML = `<p class="empty">Changelog not available: ${esc(e.message)}</p>`; }
 }
 
-async function loadPipeline(p, pid) {
-  clearTimeout(pollT);
+// Pipeline progress: one step per stage (in run order), with spinner while running
+const STEP_ICON = {success: "✓", failed: "✕", canceled: "✕", manual: "▶", skipped: "–", pending: ""};
+function stageState(list) {
+  const has = s => list.some(j => j.status === s);
+  if (has("failed")) return "failed";
+  if (list.some(j => ["running", "preparing"].includes(j.status))) return "running";
+  if (has("canceled")) return "canceled";
+  if (list.every(j => ["success", "skipped"].includes(j.status))) return list.every(j => j.status === "skipped") ? "skipped" : "success";
+  if (has("manual")) return "manual";
+  if (has("success")) return "running";   // partly done, rest waiting
+  return "pending";
+}
+function pipeStepper(jobs) {
+  if (!jobs.length) return "";
+  const stages = [];
+  jobs.forEach(j => { let st = stages.find(x => x.name === j.stage); if (!st) stages.push(st = {name: j.stage, jobs: []}); st.jobs.push(j); });
+  return `<ol class="psteps">${stages.map(st => {
+      const s = stageState(st.jobs), ok = st.jobs.filter(j => j.status === "success").length;
+      const m = s === "manual" && st.jobs.find(j => j.status === "manual");   // manual stage: icon plays its (first) manual job
+      return `<li class="pstep p-${s}" title="${esc(st.jobs.map(j => `${j.name}: ${j.status}`).join("\n"))}">
+        ${m ? `<button class="pico pplay" data-act="play" data-job="${Number(m.id)}" data-name="${esc(m.name)}" title="Play ${esc(m.name)}" aria-label="Play ${esc(m.name)}">${ic("play")}</button>`
+          : `<span class="pico" aria-hidden="true">${s === "running" ? `<span class="spin"></span>` : STEP_ICON[s] ?? ""}</span>`}
+        <span class="pname">${esc(st.name)}</span><span class="sub">${ok}/${st.jobs.length}</span></li>`;
+    }).join("")}</ol>`;
+}
+
+async function loadPipeline(p, pid, slot) {
+  clearTimeout(pollT[slot]);
+  const box = $(`#pipe-${slot}`);
   try {
     const d = await api(`/api/pipeline?project=${encodeURIComponent(p.id)}&id=${pid}`);
-    if (!$("#pipe") || $("#view").dataset.project !== p.id) return;
-    $("#pipeTitle").innerHTML = `Pipeline #${esc(pid)} · <span class="st s-${esc(d.pipeline.status)}">${esc(d.pipeline.status)}</span>
-      · <a href="${esc(d.pipeline.web_url)}" target="_blank" rel="noopener" style="font-weight:400;font-size:13px">GitLab ↗</a>`;
-    $("#pipe").innerHTML = `<div class="wrap"><table><thead><tr><th>Stage</th><th>Job</th><th>Status</th><th></th></tr></thead><tbody>
-      ${d.jobs.slice().reverse().map(j => `<tr><td>${esc(j.stage)}</td><td>${esc(j.name)}</td>
+    if (!$(`#pipe-${slot}`) || $("#view").dataset.project !== p.id) return;
+    $(`#pipeTitle-${slot}`).innerHTML = `Pipeline #${esc(pid)} · <span class="st s-${esc(d.pipeline.status)}">${esc(d.pipeline.status)}</span>
+      · <a href="${esc(d.pipeline.web_url)}" target="_blank" rel="noopener" title="Open pipeline in GitLab" aria-label="Open pipeline in GitLab">${ic("ext", "sm")}</a>`;
+    const jobs = d.jobs.slice().reverse();
+    const det = $(`#pipeJobs-${slot}`);
+    const detOpen = det ? det.open : jobs.some(j => j.status === "failed");
+    $(`#pipe-${slot}`).innerHTML = `${pipeStepper(jobs)}
+      <details class="pipe-jobs" id="pipeJobs-${slot}"${detOpen ? " open" : ""}><summary>Job details (${jobs.length})</summary><div class="wrap"><table><thead><tr><th>Stage</th><th>Job</th><th>Status</th><th></th></tr></thead><tbody>
+      ${jobs.map(j => `<tr><td>${esc(j.stage)}</td><td>${esc(j.name)}</td>
         <td><span class="st s-${esc(j.status)}">${esc(j.status)}</span></td>
-        <td>${j.status === "manual" ? `<button class="btn sm" data-act="play" data-job="${Number(j.id)}" data-name="${esc(j.name)}">▶ Play</button>` : ""}</td></tr>`).join("")
+        <td>${j.status === "manual" ? `<button class="btn sm" data-act="play" data-job="${Number(j.id)}" data-name="${esc(j.name)}" title="Play ${esc(j.name)}" aria-label="Play ${esc(j.name)}">${ic("play")}</button>` : ""}</td></tr>`).join("")
         || `<tr><td colspan="4" class="empty">No jobs.</td></tr>`}
-      </tbody></table></div>
-      ${p.production?.ref && d.pipeline.ref === p.ref && d.pipeline.status === "success"
-        ? `<div class="actions" style="margin-top:12px"><button class="btn" data-act="promote" data-from="${Number(pid)}">🚀 Promote to production (${esc(p.production.ref)})</button></div>` : ""}`;
-    if (ACTIVE.includes(d.pipeline.status)) pollT = setTimeout(() => loadPipeline(p, pid), 5000);
-  } catch (e) { if ($("#pipe")) $("#pipe").innerHTML = `<p class="empty">Error: ${esc(e.message)}</p>`; }
+      </tbody></table></div></details>`;
+    if (ACTIVE.includes(d.pipeline.status)) pollT[slot] = setTimeout(() => loadPipeline(p, pid, slot), 5000);
+  } catch (e) { if (box && $(`#pipe-${slot}`)) $(`#pipe-${slot}`).innerHTML = `<p class="empty">Error: ${esc(e.message)}</p>`; }
 }
 
 // Branch select options: staging/production + GitLab branches + current value
@@ -1051,16 +1235,33 @@ function viewScheduler() {
 
 /* ---------------- actions ---------------- */
 const actions = {
-  scrollbottom() {
-    window.scrollTo({top: document.documentElement.scrollHeight,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"});
+  tftab(el) { techFilter = {...techFilter, tech: el.dataset.tech, val: ""}; paintTechFilter(); el.focus(); },
+  tfval(el) { techFilter.val = el.dataset.v; document.querySelectorAll("[data-act=tfval]").forEach(b => b.setAttribute("aria-pressed", String(b === el))); applyTechFilter(); },
+  tftoggle(el) {   // off = hide the bar and clear the filter
+    const open = !techFilter.open; techFilter = open ? {...techFilter, open} : {tech: "typo3", val: "", open};
+    $("#tfBar").hidden = !open; el.classList.toggle("on", open); el.setAttribute("aria-expanded", String(open));
+    if (open) $("[data-act=tftab][aria-selected=true]")?.focus(); else paintTechFilter();
   },
+  pview(el) {
+    const v = el.dataset.v; try { localStorage.setItem("projectsView", v); } catch (e) {}
+    $("#view").dataset.pview = v;
+    document.querySelectorAll("[data-act=pview]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  },
+  t3review(el) {   // open the Problems row and bring it into view
+    const r = el.closest(".t3m")?.querySelector("details.t3-problems"); if (!r) return;
+    r.open = true; r.scrollIntoView({block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
+  },
+  t3mopen(el) { const d = $(`#t3dlg-${el.dataset.env}`); if (!d) return; d.showModal(); d.focus(); },
+  t3mclose(el) { el.closest("dialog")?.close(); },
   async run(el) {
-    const p = proj($("#view").dataset.project), upd = el.dataset.mode === "update";
-    if (!confirm(`Start ${upd ? "TYPO3 update pipeline" : "pipeline"} for ${p.name} (${p.ref})?`)) return;
+    const p = proj($("#view").dataset.project), upd = el.dataset.mode === "update", prod = el.dataset.mode === "production";
+    const msg = prod
+      ? `PRODUCTION: start pipeline for ${p.name} on "${p.production.ref}"?\n\nThis runs independently of staging. Make sure "${p.production.ref}" contains the intended changes (merged in GitLab) — the launcher does not merge.`
+      : `Start ${upd ? "TYPO3 update pipeline" : "staging pipeline"} for ${p.name} (${p.ref})?`;
+    if (!confirm(msg)) return;
     el.disabled = true;
     try { const r = await api("/api/run", {project:p.id, mode:el.dataset.mode}); await refresh();
-      toast(`Pipeline #${r.id} started`); location.hash = `${pUrl(p)}/pl/${r.id}`; }
+      toast(`${prod ? "Production pipeline" : "Pipeline"} #${r.id} started`); location.hash = `${pUrl(p)}/pl/${r.id}`; }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
   async runall(el) {
@@ -1132,9 +1333,21 @@ const actions = {
     catch (e) { toast(e.message, true); }
     el.disabled = false;
   },
+  async t3mrefreshhome() {   // every monitored site (project × environment), 4 at a time; then reload the overview
+    const sites = S.projects.flatMap(p => T3M_ENVS.filter(e => t3mOn(p, e)).map(e => ({p, e})));
+    const r = await runProg("home", sites.map(({p, e}) => () => api("/api/t3monitor/refresh", {project:p.id, env:e.env})));
+    if (!r) return;
+    if (location.hash.replace(/^#\/?$/, "") === "") { T3SUM = null; viewProjects(); }
+    toast(`${r.total - r.failed}/${r.total} site(s) refreshed${r.failed ? ` · ${r.failed} failed` : ""}`, !!r.failed);
+  },
+  async t3mrefreshall() {
+    const p = proj($("#view").dataset.project), envs = T3M_ENVS.filter(e => t3mOn(p, e));
+    const r = await runProg(`proj:${p.id}`, envs.map(e => () => loadT3m(p, e, true)));
+    if (r) toast(`Status refreshed: ${envs.map(e => e.label).join(" + ")}`);
+  },
   async t3mrefresh(el) {
-    el.disabled = true; el.textContent = "Checking…";
-    await loadT3m(proj($("#view").dataset.project), T3M_ENVS.find(e => e.env === el.dataset.env), true);
+    const p = proj($("#view").dataset.project), e = T3M_ENVS.find(x => x.env === el.dataset.env);
+    await runProg(`t3m:${p.id}:${e.env}`, [() => loadT3m(p, e, true)]);
   },
   async projexport(el) {
     el.disabled = true;
@@ -1169,7 +1382,16 @@ const actions = {
     try { await api("/api/token/delete", {}); await refresh(); viewSettings(); toast("Token removed"); } catch (e) { toast(e.message, true); }
   },
 };
+document.addEventListener("keydown", e => {
+  const t = e.target.closest?.("[data-act=tftab]"); if (!t || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+  const tabs = [...document.querySelectorAll("[data-act=tftab]")], i = tabs.indexOf(t);
+  const n = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  e.preventDefault(); actions.tftab(tabs[n]);
+});
 document.addEventListener("click", e => {
+  // click on the modal backdrop (outside the dialog box) closes it
+  if (e.target.matches("dialog.t3dlg")) { const r = e.target.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return e.target.close(); }
   const el = e.target.closest("[data-act]");
   if (el && actions[el.dataset.act]) { e.preventDefault(); actions[el.dataset.act](el); }
 });

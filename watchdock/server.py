@@ -9,7 +9,7 @@ from pathlib import Path
 from .core import ALLOWED_HOSTS, BASE, CONFIG, HOST, STATE, TLS_CERT, TLS_KEY, TLS_PORT, TOKEN_FILE, config, load, lock, log, now, save, stop_event
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
 from .extensions import ext_changelog, ext_release
-from .gitlab import find_project, gitlab, last_run_status, project_info, promote, require_ci, run_pipeline, save_token, search_projects, test_token, token_source
+from .gitlab import find_project, gitlab, last_run_status, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, test_token, token_source
 from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_fetch, t3m_key, t3m_key_file, t3m_summary, t3m_view
 from .watcher import resume_mail_watches
 from .projects import add_project, export_projects, import_projects, update_project
@@ -154,6 +154,8 @@ class Handler(BaseHTTPRequestHandler):
                 p = find_project(body["project"])
                 if body.get("mode") == "promote":
                     return self._send(200, promote(p, int(body["from"])))
+                if body.get("mode") == "production":
+                    return self._send(200, run_production(p))
                 src = p.get("auto_typo3", {}) if body.get("mode") == "update" else p
                 trig = "manual TYPO3 update" if body.get("mode") == "update" else "manual"
                 return self._send(200, run_pipeline(p, src.get("variables", {}), trig,

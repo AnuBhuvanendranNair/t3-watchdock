@@ -1,7 +1,7 @@
 // Gingco Patchday plugin: "Patchday" button on the project page (config.json: "gingco_patchday": {"button": true}).
 // The click is handed to the Patchday extension (its bridge script marks the page with data-patchday="1").
 (() => {
-  const {api, toast} = window.watchdock;
+  const {api, toast, ic} = window.watchdock;
   let opts = null;
 
   async function projectPage(p, view) {
@@ -10,9 +10,10 @@
     if (!opts.button || !actions || view.dataset.project !== p.id || actions.querySelector(".patchday")) return;
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "btn sec patchday";
-    b.textContent = "Patchday";
-    b.title = "Write the update history (production) into the Patchday protocol in OpenProject (Patchday extension)";
+    b.className = "btn sec icon patchday";
+    b.innerHTML = ic("patchday");
+    b.title = "Patchday: write the update history (production) into the Patchday protocol in OpenProject (Patchday extension)";
+    b.setAttribute("aria-label", b.title);
     b.onclick = () => {
       if (document.documentElement.dataset.patchday !== "1")
         return toast("Patchday extension not found. Install it, save its options once (access to this address) and reload this page.", true);
