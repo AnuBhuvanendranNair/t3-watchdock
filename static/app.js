@@ -219,6 +219,43 @@ function applyTechFilter() {
   const c = $("[data-act=tfclear]"); if (c) c.hidden = !tech;
 }
 
+// Refresh buttons with a progress fill (bottom → top). Progress lives here, keyed per button purpose, not in the
+// element: views re-render while a refresh runs (30 s poll, loadT3m), and every render draws the button from this state.
+// Fill = finished tasks + a creep for every task in flight (eases out towards 90 % of its slice), so even a single
+// request rises steadily; the real jump to its slice happens when it finishes. The creep is an estimate, not a measure.
+const PROG = {};                                     // key -> {done, total, failed, running: Map(task index -> start)}
+const progPct = key => { const s = PROG[key]; if (!s) return 0; const now = Date.now();
+  const creep = [...s.running.values()].reduce((a, t0) => a + 0.9 * (1 - Math.exp(-(now - t0) / 2000)), 0);
+  return Math.min(100, Math.round((s.done + creep) / s.total * 100)); };
+function progBtn(key, label, attrs, cls = "btn sec icon") {
+  const on = !!PROG[key];
+  return `<button type="button" class="${cls}${on ? " busy fill" : ""}" data-prog="${esc(key)}" data-tip="${esc(label)}" style="--p:${progPct(key)}%"
+    title="${esc(label)}" aria-label="${esc(label)}" ${attrs}${on ? " disabled" : ""}>${ic("refresh")}</button>`;
+}
+function progPaint(key) {
+  const s = PROG[key];
+  document.querySelectorAll(`[data-prog="${CSS.escape(key)}"]`).forEach(b => {
+    const t = s ? `Refreshing… ${s.done}/${s.total}` : b.dataset.tip;
+    b.disabled = !!s; b.classList.toggle("busy", !!s); b.classList.toggle("fill", !!s);
+    b.style.setProperty("--p", `${progPct(key)}%`); b.title = t; b.setAttribute("aria-label", t);
+  });
+}
+async function runProg(key, tasks, conc = 4) {        // tasks: async functions; returns {total, failed} or null if already running
+  if (PROG[key] || !tasks.length) return null;
+  const st = PROG[key] = {done: 0, total: tasks.length, failed: 0, running: new Map()};
+  progPaint(key);
+  const tick = setInterval(() => progPaint(key), 200);
+  let i = 0;
+  const worker = async () => { while (i < tasks.length) { const n = i++; st.running.set(n, Date.now());
+    try { await tasks[n](); } catch (e) { st.failed++; }
+    st.running.delete(n); st.done++; progPaint(key); } };
+  await Promise.all(Array.from({length: Math.min(conc, tasks.length)}, worker));
+  clearInterval(tick);
+  await new Promise(r => setTimeout(r, 350));        // let the fill reach the top before it resets
+  delete PROG[key]; progPaint(key);
+  return {total: st.total, failed: st.failed};
+}
+
 // Projects page: grid (cards) or list (TYPO3 status table); choice remembered per browser
 const projView = () => { try { return localStorage.getItem("projectsView") === "list" ? "list" : "grid"; } catch (e) { return "grid"; } };
 function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload needed
@@ -266,6 +303,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
         ${S.projects.length ? `<div class="seg" role="group" aria-label="Projects view">${[["grid", "Grid view: project cards"], ["list", "List view: TYPO3 status table"]]
           .map(([v, t]) => `<button type="button" class="seg-b" data-act="pview" data-v="${v}" title="${t}" aria-label="${t}" aria-pressed="${projView() === v}">${ic(v)}</button>`).join("")}</div>` : ""}
         ${S.projects.length ? `<button type="button" class="btn sec icon${techFilter.open ? " on" : ""}" data-act="tftoggle" title="Filter by technology" aria-label="Filter by technology" aria-expanded="${!!techFilter.open}" aria-controls="tfBar">${ic("filter")}</button>` : ""}
+        ${S.projects.some(p => T3M_ENVS.some(e => t3mOn(p, e))) ? progBtn("home", "Refresh TYPO3 status of all monitored projects", `data-act="t3mrefreshhome"`) : ""}
         ${S.projects.some(hasCI) ? icBtn("play", "Run all: start the main pipeline (not production) of every CI/CD project", `data-act="runall"`, "btn icon") : ""}
         <a class="btn sec icon" href="#/new" title="New project" aria-label="New project">${ic("plus")}</a></div></div>
     ${S.projects.length ? `<div class="tfilter" id="tfBar" role="search" aria-label="Filter projects by technology"${techFilter.open ? "" : " hidden"}>
@@ -453,6 +491,7 @@ function viewProject(p, pipelineId) {
       <div><h1>${esc(p.name)}</h1>
         <div class="sub">${esc(p.path)} · <code>${esc(p.ref)}</code> · <a href="${esc(glUrl(p))}" target="_blank" rel="noopener">GitLab ${ic("ext", "sm")}</a></div></div>
       <div class="actions">
+        ${T3M_ENVS.some(e => t3mOn(p, e)) ? progBtn(`proj:${p.id}`, "Refresh TYPO3 status of all monitored environments", `data-act="t3mrefreshall"`) : ""}
         ${a.enabled ? icBtn("update", "Run TYPO3 update (staging pipeline)", `data-act="run" data-mode="update"`) : ""}
         ${icBtn("send", "Send update commands: ready-to-run commands for pending extension updates via Teams / email", `data-act="updsend"`)}
         <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
@@ -519,6 +558,7 @@ function viewProjectNoCI(p) {
       <div><h1>${esc(p.name)}</h1>
         <div class="sub"><span class="chip">no CI/CD</span>${p.path ? ` · ${esc(p.path)}` : ""}${p.ref ? ` · <code>${esc(p.ref)}</code>` : ""}</div></div>
       <div class="actions">
+        ${T3M_ENVS.some(e => t3mOn(p, e)) ? progBtn(`proj:${p.id}`, "Refresh TYPO3 status of all monitored environments", `data-act="t3mrefreshall"`) : ""}
         ${icBtn("send", `Send update list: pending extension updates via Teams / email${p.ref ? " (with ready-to-run commands)" : ""}`, `data-act="updsend"`)}
         <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
@@ -558,7 +598,7 @@ async function loadT3m(p, e, refreshNow) {
       <div class="t3h-k">TYPO3 status</div>
       <h2 class="t3h-t">${esc(title || p.name)} <span class="t3pill">${esc(e.label)}</span></h2>
       ${meta ? `<div class="t3h-m">${meta}</div>` : ""}</div>
-    <div class="t3h-a">${t3mOn(p, e) ? icBtn("refresh", `Refresh ${e.label} status now`, `data-act="t3mrefresh" data-env="${e.env}"`, "btn sec icon t3sq") : ""}
+    <div class="t3h-a">${t3mOn(p, e) ? progBtn(`t3m:${p.id}:${e.env}`, `Refresh ${e.label} status now`, `data-act="t3mrefresh" data-env="${e.env}"`, "btn sec icon t3sq") : ""}
       ${icBtn("close", "Close", `data-act="t3mclose"`, "btn sec icon t3sq")}</div></div>
     <div class="t3body">${body}</div>`;
   if (!t3mOn(p, e)) {
@@ -1292,9 +1332,21 @@ const actions = {
     catch (e) { toast(e.message, true); }
     el.disabled = false;
   },
+  async t3mrefreshhome() {   // every monitored site (project × environment), 4 at a time; then reload the overview
+    const sites = S.projects.flatMap(p => T3M_ENVS.filter(e => t3mOn(p, e)).map(e => ({p, e})));
+    const r = await runProg("home", sites.map(({p, e}) => () => api("/api/t3monitor/refresh", {project:p.id, env:e.env})));
+    if (!r) return;
+    if (location.hash.replace(/^#\/?$/, "") === "") { T3SUM = null; viewProjects(); }
+    toast(`${r.total - r.failed}/${r.total} site(s) refreshed${r.failed ? ` · ${r.failed} failed` : ""}`, !!r.failed);
+  },
+  async t3mrefreshall() {
+    const p = proj($("#view").dataset.project), envs = T3M_ENVS.filter(e => t3mOn(p, e));
+    const r = await runProg(`proj:${p.id}`, envs.map(e => () => loadT3m(p, e, true)));
+    if (r) toast(`Status refreshed: ${envs.map(e => e.label).join(" + ")}`);
+  },
   async t3mrefresh(el) {
-    el.disabled = true; el.classList.add("busy");
-    await loadT3m(proj($("#view").dataset.project), T3M_ENVS.find(e => e.env === el.dataset.env), true);
+    const p = proj($("#view").dataset.project), e = T3M_ENVS.find(x => x.env === el.dataset.env);
+    await runProg(`t3m:${p.id}:${e.env}`, [() => loadT3m(p, e, true)]);
   },
   async projexport(el) {
     el.disabled = true;

@@ -490,6 +490,12 @@ button.hchip:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 #view[data-pview="list"]>.grid{display:none}
 #view[data-pview="list"] #t3sum{margin-top:0!important}
 
+/* progress fill (bottom → top) inside a busy button; --p set by JS (0%–100%) */
+.btn.fill{position:relative;overflow:hidden;isolation:isolate}
+.btn.fill::before{content:"";position:absolute;left:0;right:0;bottom:0;height:var(--p,0%);background:color-mix(in srgb,var(--acc) 35%,transparent);transition:height .3s ease;z-index:-1}
+.btn.fill:disabled{opacity:1}
+@media (prefers-reduced-motion:reduce){.btn.fill::before{transition:none}}
+
 /* Projects page: technology filter */
 .tfilter{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:0 0 16px}
 .tfilter[hidden]{display:none}
