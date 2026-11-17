@@ -334,16 +334,31 @@ const systemOverviewCard = () => `
     <section class="card system-overview">
       <div class="system-overview-heading">
         <h2>System overview</h2>
-        <button type="button" class="btn sec sm scroll-bottom" data-act="scrollbottom"
-          aria-label="Scroll to bottom" title="Scroll to bottom"><span aria-hidden="true">↓</span></button>
       </div>
       <div class="system-environments">
         ${T3M_ENVS.map(e => `<section>
-          <h3>${esc(e.label)}</h3>
+          <div class="system-env-head"><h3>${esc(e.label)}</h3>
+            ${icBtn("details", `${e.label}: TYPO3 status details`, `data-act="t3mopen" data-env="${e.env}"`, "btn sec sm icon")}</div>
           <div class="system-details" id="system-${e.env}" aria-live="polite">Loading…</div>
         </section>`).join("")}
       </div>
-    </section>`;
+    </section>
+    ${T3M_ENVS.map(e => `<dialog class="t3dlg" id="t3dlg-${e.env}" aria-label="TYPO3 status – ${esc(e.label)}" tabindex="-1" autofocus>
+      <div id="t3m-${e.env}" class="t3m"><div class="t3h"><div><div class="t3h-k">TYPO3 status</div><h2 class="t3h-t">${esc(e.label)}</h2></div>
+        <div class="t3h-a">${icBtn("close", "Close", `data-act="t3mclose"`, "btn sec icon t3sq")}</div></div><p class="empty">Loading…</p></div></dialog>`).join("")}`;
+
+// Long date "17 Nov 2026", time "17:14", schedule "Runs Mon–Fri at 15:17" (from "daily at 15:17 (Mon, Tue, Wed, Thu, Fri)")
+const dlong = t => { const x = new Date(t); return Number.isNaN(x.getTime()) ? fmt(t)
+  : x.toLocaleDateString("en-GB", {day: "numeric", month: "short", year: "numeric"}); };
+const hm = t => fmt(t).slice(11, 16);
+function runsTxt(sch) {
+  const m = /^daily at (\d\d:\d\d) \((.+)\)$/.exec(sch || "");
+  if (!m) return sch ? `Runs ${sch}` : "No schedule";
+  if (m[2] === "every day") return `Runs daily at ${m[1]}`;
+  const D = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], ds = m[2].split(", "), ix = ds.map(x => D.indexOf(x));
+  const range = ds.length > 2 && ix.every((v, i) => v >= 0 && (i === 0 || v === ix[i - 1] + 1));
+  return `Runs ${range ? `${ds[0]}–${ds[ds.length - 1]}` : ds.join(", ")} at ${m[1]}`;
+}
 
 function viewProject(p, pipelineId) {
   if (!hasCI(p)) return viewProjectNoCI(p);
@@ -407,8 +422,7 @@ function viewProject(p, pipelineId) {
           <button class="btn danger sm" data-act="del">Remove project</button></div>
       </div>
     </div>
-    ${T3M_ENVS.map(e => `<details class="card full t3env" id="t3m-${e.env}"><summary>TYPO3 status – ${esc(e.label)}
-      <span class="t3meta sub">Loading…</span></summary></details>`).join("")}`;
+`;
   $("#view").dataset.project = p.id;
   envs.forEach(e => e.pid && loadPipeline(p, e.pid, e.slot));
   T3M_ENVS.forEach(e => loadT3m(p, e));
@@ -437,8 +451,7 @@ function viewProjectNoCI(p) {
       </div>
     </div>
     ${systemOverviewCard()}
-    ${T3M_ENVS.map(e => `<details class="card full t3env" id="t3m-${e.env}"><summary>TYPO3 status – ${esc(e.label)}
-      <span class="t3meta sub">Loading…</span></summary></details>`).join("")}
+
     <div class="card danger-zone" style="margin-top:18px"><h2>Danger zone</h2>
       <p class="sub" style="margin:0 0 10px">Removes the project from the launcher only.</p>
       <button class="btn danger sm" data-act="del">Remove project</button></div>`;
@@ -453,32 +466,31 @@ const verCmp = (a, b) => { const x = String(a).split("."), y = String(b).split("
   for (let i = 0; i < 3; i++) { const d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0); if (d) return d; } return 0; };
 
 // Security section of an instance (result of the scheduled "PHP version & security advisories" task)
-function secBlock(sec) {
-  const task = S.scheduler.find(t => t.id === "security");
-  if (!sec) return `<details><summary>Security · not checked yet</summary><p class="empty">Runs with the
-    <a href="#/scheduler">${esc(task?.name || "security")}</a> task (${esc(task?.cfg.enabled === false ? "off" : task?.schedule || "–")}).</p></details>`;
+function secBody(sec) {
   const adv = sec.advisories || [], php = sec.php;
-  const meta = [adv.length ? `<span class="sev-2">${adv.length} advisor${adv.length === 1 ? "y" : "ies"}</span>` : "no advisories",
-    php?.severity ? `<span class="sev-${php.severity}">${esc(php.text)}</span>` : ""].filter(Boolean).join(" · ");
-  return `<details${adv.length || php?.severity ? " open" : ""}><summary>Security · ${meta}</summary>
-    <p class="sub" style="margin:0 0 8px">${php ? esc(php.text) : "PHP version unknown"} · checked ${esc(fmt(sec.checked))}</p>
+  return `<p class="sub" style="margin:0 0 8px">${php ? esc(php.text) : "PHP version unknown"} · checked ${esc(fmt(sec.checked))}</p>
     ${adv.length ? `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Package</th><th>Installed</th><th>Advisory</th><th>Affected</th></tr></thead><tbody>
       ${adv.map(a => `<tr><td><span class="badge ${a.severity === "low" ? "sev-1" : "sev-2"}">${esc(a.severity || "?")}</span></td><td><code>${esc(a.package)}</code></td>
-        <td>${esc(a.version)}</td><td>${/^https?:\/\//.test(a.link || "") ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ↗</a>` : esc(a.title)}${a.cve ? ` <span class="sub">${esc(a.cve)}</span>` : ""}</td>
+        <td>${esc(a.version)}</td><td>${/^https?:\/\//.test(a.link || "") ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ${ic("ext", "sm")}</a>` : esc(a.title)}${a.cve ? ` <span class="sub">${esc(a.cve)}</span>` : ""}</td>
         <td class="sub">${esc(a.affected)}</td></tr>`).join("")}</tbody></table></div>`
-      : `<p class="empty">No known security advisories for TYPO3 core and the public extensions.</p>`}</details>`;
+      : `<p class="empty">No known security advisories for TYPO3 core and the public extensions.</p>`}`;
 }
 
 async function loadT3m(p, e, refreshNow) {
   const id = "#t3m-" + e.env, box = $(id); if (!box) return;
   const overview = $("#system-" + e.env);
   const url = p[e.cfg]?.url;
-  // Collapsible section: heading + compact status in the summary, details in the body (open state is kept on re-render)
-  const set = (meta, body) => box.innerHTML = `<summary>TYPO3 status – ${esc(e.label)} <span class="t3meta">${meta}</span></summary>
+  // Modal content (dialog opened from the System overview tile): header (site, env, meta line, refresh/close), then body
+  const set = (meta, body, title) => box.innerHTML = `<div class="t3h"><div>
+      <div class="t3h-k">TYPO3 status</div>
+      <h2 class="t3h-t">${esc(title || p.name)} <span class="t3pill">${esc(e.label)}</span></h2>
+      ${meta ? `<div class="t3h-m">${meta}</div>` : ""}</div>
+    <div class="t3h-a">${t3mOn(p, e) ? icBtn("refresh", `Refresh ${e.label} status now`, `data-act="t3mrefresh" data-env="${e.env}"`, "btn sec icon t3sq") : ""}
+      ${icBtn("close", "Close", `data-act="t3mclose"`, "btn sec icon t3sq")}</div></div>
     <div class="t3body">${body}</div>`;
   if (!t3mOn(p, e)) {
     if (overview) overview.textContent = "Monitoring not configured";
-    set(`<span class="sub">not configured</span>`, `<p class="empty">Add the ${esc(e.label)} t3monitor URL and key under
+    set("", `<p class="empty">Add the ${esc(e.label)} t3monitor URL and key under
       <a href="${pUrl(p)}/edit">Edit</a> to see TYPO3 version, extensions, status checks and their history.</p>`);
     return;
   }
@@ -487,18 +499,21 @@ async function loadT3m(p, e, refreshNow) {
                        : await api(`/api/t3monitor?project=${encodeURIComponent(p.id)}&env=${e.env}`); }
   catch (err) {
     if (overview) overview.textContent = "System status unavailable";
-    set(`<span class="sev-2">error</span>`, `<p class="empty">Error: ${esc(err.message)}</p>`);
+    set("", `<div class="t3alert err"><span class="t3dot"></span><div><b>Status unavailable</b><div class="sub">${esc(err.message)}</div></div></div>`);
     return;
   }
   if ($(id) !== box || $("#view").dataset.project !== p.id) return;
-  const c = d.current, head = `<div class="head" style="margin-bottom:12px"><div>
-      <div class="sub">${c ? esc(c.site_name) + " · " : ""}<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)} ${ic("ext", "sm")}</a>
-      · last check ${esc(fmt(d.last_check))} · <a href="#/scheduler">schedule: ${esc(S.scheduler.find(t => t.id === "t3monitor")?.cfg.enabled === false ? "off" : S.scheduler.find(t => t.id === "t3monitor")?.schedule)}</a></div></div>
-      ${icBtn("refresh", `Refresh ${e.label} status now`, `data-act="t3mrefresh" data-env="${e.env}"`, "btn sec sm icon")}</div>
-    ${d.last_error ? `<p class="sev-2" style="margin:0 0 12px;font-size:13px">Last check failed: ${esc(d.last_error)}</p>` : ""}`;
-  const failed = d.last_error ? `<span class="sev-2" title="${esc(d.last_error)}">⚠ last check failed</span>` : "";
-  if (overview) overview.innerHTML = systemOverview(d);
-  if (!c) { set(`<span class="sub">no data yet</span>${failed}`, head + `<p class="empty">No data yet. Click the refresh button.</p>`); return; }
+  const c = d.current;
+  const sch = S.scheduler.find(t => t.id === "t3monitor");
+  let host = url; try { host = new URL(url).host.replace(/^www\./, ""); } catch {}
+  const meta = [`<a href="${esc(url)}" target="_blank" rel="noopener">${esc(host)} ${ic("ext", "sm")}</a>`,
+    d.last_check ? `<span title="${esc(fmt(d.last_check))}">Checked ${esc(dlong(d.last_check))}, ${esc(hm(d.last_check))}</span>` : "Not checked yet",
+    `<a href="#/scheduler" class="t3h-sch">${esc(sch?.cfg.enabled === false ? "Schedule off" : runsTxt(sch?.schedule))}</a>`].join(`<span class="t3sep">·</span>`);
+  const title = c?.site_name || `${p.name} – ${e.label}`;
+  const failedAlert = d.last_error ? `<div class="t3alert err"><span class="t3dot"></span><div><b>Last check failed</b>
+    <div class="sub">${esc(d.last_error)}${c ? " · showing the last successful check" : ""}</div></div></div>` : "";
+  if (overview) overview.innerHTML = systemOverview(d, e.env);
+  if (!c) { set(meta, failedAlert + `<p class="empty">No data yet. Click the refresh button.</p>`, title); return; }
   const counts = {}; c.status.forEach(x => counts[x.severity] = (counts[x.severity] || 0) + 1);
   const major = String(c.typo3 || "").split(".")[0], latest = S.typo3_latest[major];
   const upd = latest && c.typo3 && verCmp(latest, c.typo3) > 0;
@@ -513,27 +528,43 @@ async function loadT3m(p, e, refreshNow) {
     : !("latest" in x) ? `<span class="sub">not checked yet</span>`
     : x.latest === null ? `<span class="sub" title="Package not found on Packagist">not on Packagist</span>`
     : x.latest === "" ? `<span class="sub">no compatible release</span>` : `<span class="sub">up to date</span>`;
-  const row = x => `<tr><td>${sevBadge(x.severity)}</td><td>${esc(x.group)}</td><td><b>${esc(x.title)}</b>
+  const nn = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const errs = counts[2] || 0, warns = counts[1] || 0, pass = counts[0] || 0, total = c.status.length;
+  const tone = errs ? "err" : warns ? "warn" : "ok";
+  const alert = failedAlert || (errs || warns
+    ? `<div class="t3alert ${tone}"><span class="t3dot"></span><div><b>${[errs && nn(errs, "error"), warns && nn(warns, "warning")].filter(Boolean).join(" and ")} need${errs + warns === 1 ? "s" : ""} attention</b>
+        <div class="sub">${pass} of ${total} checks passing</div></div>
+        <button type="button" class="t3alert-b" data-act="t3review">Review problems</button></div>`
+    : `<div class="t3alert ok"><span class="t3dot"></span><div><b>All checks passing</b><div class="sub">${pass} of ${total} checks passing</div></div></div>`);
+  // security (scheduled task): stat + optional row with the advisories
+  const sec = d.security, adv = sec?.advisories || [], php = sec?.php;
+  const secStat = !sec ? ["–", "Not checked yet", "sub"]
+    : adv.length ? ["At risk", nn(adv.length, "advisory").replace("advisorys", "advisories"), "sev-2"]
+    : php?.severity ? ["Clean", php.text, `sev-${php.severity}`] : ["Clean", "No advisories", "sev0"];
+  const stat = (k, v, sub, cls = "sub") => `<div class="t3stat"><div class="t3stat-k">${k}</div><div class="t3stat-v">${v}</div><div class="${cls}">${sub}</div></div>`;
+  const [dbN, ...dbV] = dbShort(c.db).split(" "), [webN, webV] = String(c.webserver || "").split("/"), [osN, ...osV] = String(c.os || "").split(" ");
+  const chip = (n, v, full) => n ? `<span class="t3chip" title="${esc(full || "")}">${esc(n)} <b>${esc(v || "")}</b></span>` : "";
+  const row = (cls, dot, label, rmeta, body) => `<details class="t3row ${cls}"><summary><span class="t3dot ${dot}"></span><span class="t3row-l">${label}</span>
+      <span class="t3row-m">${rmeta}</span>${ic("chev", "t3chev")}</summary><div class="t3row-b">${body}</div></details>`;
+  const trow = x => `<tr><td>${sevBadge(x.severity)}</td><td>${esc(x.group)}</td><td><b>${esc(x.title)}</b>
       ${x.message ? `<div class="msg">${esc(x.message)}</div>` : ""}</td><td>${esc(x.value)}</td></tr>`;
-  set(`<b>${esc(c.typo3 || "?")}</b>${upd ? `<span class="sev-1">↑ ${esc(latest)}</span>` : ""}
-      ${c.php ? `<span class="sub">PHP ${esc(c.php)}</span>` : ""}
-      <span class="badge ${counts[2] ? "sev-2" : "sev0"}">${counts[2] || 0} error${counts[2] === 1 ? "" : "s"}</span>
-      <span class="badge ${counts[1] ? "sev-1" : "sev0"}">${counts[1] || 0} warning${counts[1] === 1 ? "" : "s"}</span>
-      ${updExt.length ? `<span class="badge" style="color:var(${majExt.length ? "--run" : "--acc"})">${esc(updTxt.replace("update", "ext update"))}</span>` : ""}
-      <span class="sub">checked ${esc(fmt(d.last_check))}</span>${failed}`, head + `
-    <div class="kpis">
-      <div class="kpi"><div class="sub">TYPO3</div><div class="v">${esc(c.typo3 || "?")}</div>
-        <div class="sub ${upd ? "sev-1" : "sev0"}">${latest ? (upd ? `update available: ${esc(latest)}` : `latest (${esc(latest)})`) : "latest unknown"}</div></div>
-      <div class="kpi"><div class="sub">Errors</div><div class="v sev-2">${counts[2] || 0}</div></div>
-      <div class="kpi"><div class="sub">Warnings</div><div class="v sev-1">${counts[1] || 0}</div></div>
-      <div class="kpi"><div class="sub">OK checks</div><div class="v sev0">${counts[0] || 0}</div></div>
-      <div class="kpi"><div class="sub">Extensions</div><div class="v">${exts.length}</div>${local.length ? `<div class="sub">+ ${local.length} local (hidden)</div>` : ""}
-        ${updExt.length ? `<div class="sub ${majExt.length ? "sev-1" : ""}" style="${majExt.length ? "" : "color:var(--acc)"}">${esc(updTxt)}</div>` : ""}</div>
-      <div class="kpi"><div class="sub">Unchanged since</div><div class="v" style="font-size:14px">${esc(fmt(d.since))}</div></div>
+  const checksTable = list => `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Area</th><th>Check</th><th>Value</th></tr></thead>
+      <tbody>${list.map(trow).join("")}</tbody></table></div>`;
+  const updRows = d.updates || [];
+  set(meta, `${alert}
+    <div class="t3stats">
+      ${stat("TYPO3", esc(c.typo3 || "?"), latest ? (upd ? `Update available: ${esc(latest)}` : "Latest version") : "Latest unknown", latest ? (upd ? "sev-1" : "sev0") : "sub")}
+      ${stat("Security", secStat[0], esc(secStat[1]), secStat[2])}
+      ${stat("Extensions", exts.length, updExt.length ? esc(updTxt) : local.length ? `+ ${local.length} local, hidden` : "No updates", updExt.length ? "sev-1" : "sub")}
+      ${stat("Unchanged since", d.since ? esc(hm(d.since)) : "–", d.since ? esc(dlong(d.since)) : "", "sub")}
     </div>
-    <div class="srv">${[["PHP", c.php], ["Database", c.db], ["Web server", c.webserver], ["OS", c.os]]
-      .map(([k, val]) => `<div><div class="sub">${k}</div><div class="srv-v">${esc(val || "–")}</div></div>`).join("")}</div>
-    <details><summary>Extensions (${exts.length})${updTxt ? ` · ${esc(updTxt)}` : ""}</summary>
+    <div class="t3chips">${chip("PHP", c.php, c.php)}${chip(dbN, dbV.join(" "), c.db)}${chip(webN, webV, c.webserver)}${chip(osN, osV.join(" "), c.os)}</div>
+    <div class="t3rows">
+      ${row("t3-problems", problems.length ? tone : "", "Problems", problems.length ? [errs && nn(errs, "error"), warns && nn(warns, "warning")].filter(Boolean).join(" · ") : "None",
+        problems.length ? checksTable(problems) : `<p class="empty">No errors or warnings.</p>`)}
+      ${sec && (adv.length || php?.severity) ? row("", adv.length ? "err" : `sev${php.severity}`, "Security", adv.length ? secStat[1] : esc(php.text), secBody(sec)) : ""}
+      ${row("", "", "All status checks", total, checksTable(c.status.slice().sort((a, b) => b.severity - a.severity)))}
+      ${row("", updExt.length ? "warn" : "", "Extensions", `${exts.length}${updTxt ? ` · ${esc(updTxt)}` : ""}`, `
       ${local.length ? `<label class="check" style="margin-bottom:8px"><input type="checkbox" class="showLocal"> Show local extensions (${local.length}): ${esc(local.map(([k]) => k).join(", "))}</label>` : ""}
       <div class="wrap"><table>
       <thead><tr><th>Extension</th><th>Title</th><th>Version</th><th>Latest</th><th>Composer package</th></tr></thead><tbody>
@@ -542,19 +573,13 @@ async function loadT3m(p, e, refreshNow) {
           data-installed="${esc(e.version)}" data-major="${e.update && e.major ? 1 : ""}" title="Click to show the changelog${e.update ? " of " + esc(e.latest) : ""}"` : ""}>
         <td>${!e.local && e.composer ? `<span class="tw">▸</span>` : ""}<code>${esc(k)}</code>${e.local ? ` <span class="chip">local</span>` : ""}</td>
         <td>${esc(e.title)}</td><td>${esc(e.version)}</td><td>${latestCell(e)}</td><td>${esc(e.composer)}</td></tr>`).join("")}
-      </tbody></table></div></details>
-    ${secBlock(d.security)}
-    <details><summary>Problems (${problems.length ? `${counts[2] || 0} error${counts[2] === 1 ? "" : "s"}, ${counts[1] || 0} warning${counts[1] === 1 ? "" : "s"}` : "none"})</summary>
-      ${problems.length ? `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Area</th><th>Check</th><th>Value</th></tr></thead>
-      <tbody>${problems.map(row).join("")}</tbody></table></div>` : `<p class="empty">No errors or warnings.</p>`}</details>
-    <details><summary>All status checks (${c.status.length})</summary><div class="wrap"><table class="checks">
-      <thead><tr><th>Severity</th><th>Area</th><th>Check</th><th>Value</th></tr></thead>
-      <tbody>${c.status.slice().sort((a, b) => b.severity - a.severity).map(row).join("")}</tbody></table></div></details>
-    ${updHistory(d.updates || [])}
-    <details><summary>History (${d.history.length} change${d.history.length === 1 ? "" : "s"})</summary><ul class="tl">
+      </tbody></table></div>`)}
+      ${row("upd-hist", "", "Update history", updRows.length ? nn(updRows.length, "update") : "None yet", updHistoryBody(updRows))}
+      ${row("", "", "Change history", nn(d.history.length, "change"), `<ul class="tl">
       ${d.history.map(h => `<li><div class="when">${esc(fmt(h.t))}${h.last !== h.t ? ` – seen until ${esc(fmt(h.last))}` : ""} · TYPO3 ${esc(h.typo3 || "?")}</div>
         <ul>${h.changes.map(x => `<li>${esc(x)}</li>`).join("")}</ul></li>`).join("")}
-    </ul></details>`);
+    </ul>`)}
+    </div>`, title);
   box.querySelectorAll("tr[data-ext]").forEach(tr => tr.onclick = () => toggleChangelog(tr));
   const uh = box.querySelector("details.upd-hist");
   if (uh) uh.ontoggle = () => uh.open && loadReleaseInfo(uh);
@@ -562,7 +587,7 @@ async function loadT3m(p, e, refreshNow) {
   if (sl) sl.onchange = () => box.querySelectorAll("tr.local").forEach(r => r.hidden = !sl.checked);
 }
 
-function systemOverview({current, last_check, last_error}) {
+function systemOverview({current, last_check, last_error}, env) {
   const check = last_error ? `<span class="sev-2" title="${esc(last_error)}">Last check failed</span>`
     : last_check ? `Checked ${esc(fmt(last_check))}` : "";
   if (!current) return check || "No checks yet";
@@ -571,9 +596,12 @@ function systemOverview({current, last_check, last_error}) {
   const errors = current.status.filter(item => item.severity === 2).length;
   const warnings = current.status.filter(item => item.severity === 1).length;
   return `<dl>${versions.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "–")}</dd></div>`).join("")}</dl>
-    <div class="system-health">
-      <span class="${errors ? "sev-2" : "sub"}">${errors} errors</span>
-      <span class="${warnings ? "sev-1" : "sub"}">${warnings} warnings</span>
+    <div class="system-health">${errors || warnings
+      ? [["err", "sev-2", errors, "error"], ["warn", "sev-1", warnings, "warning"]].map(([i, cls, n, w]) => {
+          const t = `${n} ${w}${n === 1 ? "" : "s"}${n ? " – show details" : ""}`;
+          return `<button type="button" class="hchip ${n ? cls : "zero"}" data-act="t3mopen" data-env="${env}" title="${t}" aria-label="${t}">${ic(i)}<b>${n}</b></button>`;
+        }).join("")
+      : `<span class="hchip sev0" title="No errors or warnings">${ic("ok")}<b>OK</b></span>`}
     </div>
     ${check ? `<div class="system-check sub">${check}</div>` : ""}`;
 }
@@ -605,15 +633,15 @@ function mdRender(md, base) {
 // Update history: TYPO3 / extension version changes between t3monitor snapshots (newest first)
 const dmy = s => s ? s.slice(0, 10).split("-").reverse().join(".") : "";
 const UPD_ICON = {updated: ["↻", "updated"], added: ["+", "added"], removed: ["✖", "removed"]};
-function updHistory(rows) {
-  if (!rows.length) return `<details class="upd-hist"><summary>Update history (none yet)</summary><p class="empty">No version changes recorded since the first check.</p></details>`;
-  return `<details class="upd-hist"><summary>Update history (${rows.length})</summary><div class="wrap"><table class="upd-table">
+function updHistoryBody(rows) {
+  if (!rows.length) return `<p class="empty">No version changes recorded since the first check.</p>`;
+  return `<div class="wrap"><table class="upd-table">
     <thead><tr><th>Last change</th><th>Old version</th><th></th><th>Inst. version</th><th>Extension key</th><th>Name</th><th>Available since</th><th>Description</th></tr></thead><tbody>
     ${rows.map(r => { const [ic, lbl] = UPD_ICON[r.action]; const ver = r.new || r.old;
       return `<tr class="${r.core ? "core" : ""} ${r.action}" ${r.composer && ver ? `data-composer="${esc(r.composer)}" data-version="${esc(ver)}" data-core="${r.core ? 1 : ""}"` : ""}>
       <td>${esc(dmy(r.t))}</td><td>${esc(r.old || "–")}</td><td class="act" title="${lbl}">${ic}</td><td>${esc(r.new || "–")}</td>
       <td><code>${esc(r.key)}</code></td><td>${esc(r.title)}</td><td class="rel-time"></td><td class="rel-sum"></td></tr>`; }).join("")}
-    </tbody></table></div><p class="sub" style="margin:6px 0 0">Recorded from t3monitor checks. Available since = release date of the installed version (removed: of the old version) on Packagist; description = first changelog line (GitHub/GitLab).</p></details>`;
+    </tbody></table></div><p class="sub" style="margin:6px 0 0">Recorded from t3monitor checks. Available since = release date of the installed version (removed: of the old version) on Packagist; description = first changelog line (GitHub/GitLab).</p>`;
 }
 async function loadReleaseInfo(det) {
   if (det.dataset.loaded) return;
@@ -1094,10 +1122,12 @@ function viewScheduler() {
 
 /* ---------------- actions ---------------- */
 const actions = {
-  scrollbottom() {
-    window.scrollTo({top: document.documentElement.scrollHeight,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"});
+  t3review(el) {   // open the Problems row and bring it into view
+    const r = el.closest(".t3m")?.querySelector("details.t3-problems"); if (!r) return;
+    r.open = true; r.scrollIntoView({block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
   },
+  t3mopen(el) { const d = $(`#t3dlg-${el.dataset.env}`); if (!d) return; d.showModal(); d.focus(); },
+  t3mclose(el) { el.closest("dialog")?.close(); },
   async run(el) {
     const p = proj($("#view").dataset.project), upd = el.dataset.mode === "update", prod = el.dataset.mode === "production";
     const msg = prod
@@ -1216,6 +1246,9 @@ const actions = {
   },
 };
 document.addEventListener("click", e => {
+  // click on the modal backdrop (outside the dialog box) closes it
+  if (e.target.matches("dialog.t3dlg")) { const r = e.target.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return e.target.close(); }
   const el = e.target.closest("[data-act]");
   if (el && actions[el.dataset.act]) { e.preventDefault(); actions[el.dataset.act](el); }
 });
