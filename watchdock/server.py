@@ -8,8 +8,8 @@ from pathlib import Path
 
 from .core import ALLOWED_HOSTS, BASE, CONFIG, HOST, STATE, TLS_CERT, TLS_KEY, TLS_PORT, TOKEN_FILE, config, load, lock, log, now, save, stop_event
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
-from .extensions import ext_changelog
-from .gitlab import find_project, gitlab, project_info, promote, require_ci, run_pipeline, save_token, search_projects, test_token, token_source
+from .extensions import ext_changelog, ext_release
+from .gitlab import find_project, gitlab, last_run_status, project_info, promote, require_ci, run_pipeline, save_token, search_projects, test_token, token_source
 from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_fetch, t3m_key, t3m_key_file, t3m_summary, t3m_view
 from .watcher import resume_mail_watches
 from .projects import add_project, export_projects, import_projects, update_project
@@ -106,12 +106,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"url": gitlab(p, "GET", "").get("avatar_url")})
             if u.path == "/api/ext/changelog":
                 return self._send(200, ext_changelog(q["composer"][0], q["version"][0], q.get("installed", [""])[0]))
+            if u.path == "/api/ext/release":
+                return self._send(200, ext_release(q["composer"][0], q["version"][0], q.get("summary", ["1"])[0] != "0"))
             if u.path == "/api/t3monitor/summary":
                 return self._send(200, t3m_summary())
             if u.path == "/api/t3monitor":
                 return self._send(200, t3m_view(find_project(q["project"][0])["id"], q.get("env", ["production"])[0]))
             if u.path == "/api/search":
                 return self._send(200, search_projects(q["gitlab_url"][0], q["q"][0]))
+            if u.path == "/api/runs/status":
+                return self._send(200, last_run_status())
             if u.path == "/api/pipeline":
                 p = find_project(q["project"][0])
                 pid = int(q["id"][0])

@@ -7,8 +7,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
-from .core import STATE, TOKEN_FALLBACK, TOKEN_FILE, config, load, lock, log, now, save, stop_event
+from .core import FINAL_STATUSES, STATE, TOKEN_FALLBACK, TOKEN_FILE, config, load, lock, log, now, save, stop_event
 
 
 # ---------------------------------------------------------------- GitLab
@@ -196,3 +197,48 @@ def promote(project, source_id):
                            f"(ref '{src.get('ref')}', status '{src.get('status')}')")
     return run_pipeline(project, prod.get("variables", {}), f"promote #{source_id} -> {prod['ref']}",
                         prod.get("auto_play", []), ref=prod["ref"])
+
+
+# ---------------------------------------------------------------- last run status (project cards)
+RUN_TTL_ACTIVE, RUN_TTL_WAIT, RUN_TTL_FINAL = 8, 30, 300   # seconds a status is cached (busy / manual / finished)
+_run_cache = {}                                 # (project id, pipeline id) -> (fetched at, status dict)
+
+
+def _run_status(project, pipeline_id):
+    key = (project["id"], pipeline_id)
+    hit = _run_cache.get(key)
+    ttl = (RUN_TTL_FINAL if hit and hit[1].get("status") in FINAL_STATUSES
+           else RUN_TTL_WAIT if hit and hit[1].get("status") in ("manual", "scheduled") else RUN_TTL_ACTIVE)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    try:
+        pl = gitlab(project, "GET", f"/pipelines/{pipeline_id}")
+        out = {"status": pl.get("status"), "started": pl.get("started_at") or pl.get("created_at"),
+               "finished": pl.get("finished_at")}
+        if out["status"] not in FINAL_STATUSES:           # name the job that is running / waiting
+            jobs = gitlab(project, "GET", f"/pipelines/{pipeline_id}/jobs?per_page=100")
+            for st in ("running", "pending", "manual"):
+                names = [j.get("name") for j in jobs if j.get("status") == st]
+                if names:
+                    out["job"], out["job_status"] = ", ".join(names[:3]), st
+                    break
+    except Exception as e:
+        out = {"status": None, "error": str(e)[:200]}
+    _run_cache[key] = (time.time(), out)
+    return out
+
+
+def last_run_status():
+    """{project id: {pipeline, status, started, finished, job?, job_status?, error?}} for the last run of each project."""
+    projects = {p["id"]: p for p in config()["projects"] if p.get("ci", True) is not False}
+    last = {}
+    for r in load(STATE, {}).get("runs", []):
+        if r.get("project") in projects and r["project"] not in last:
+            last[r["project"]] = int(r["pipeline"])
+    for k in [k for k in _run_cache if (k[0], k[1]) not in last.items()]:
+        _run_cache.pop(k, None)                         # forget older runs
+    if not last:
+        return {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        res = dict(zip(last, ex.map(lambda pid: _run_status(projects[pid], last[pid]), last)))
+    return {pid: {"pipeline": last[pid], **res[pid]} for pid in last}

@@ -167,6 +167,35 @@ def t3m_changes(old, new):
     return ch
 
 
+def t3m_update_rows(snaps):
+    """Update history: one row per TYPO3 / extension version change between consecutive snapshots (newest first).
+    Own-vendor extensions (t3monitor_local_vendors) are left out; dev branches (e.g. dev-main) are kept."""
+    vendors = config().get("t3monitor_local_vendors", ["gingco"])
+    def exts(d):
+        return {k: v for k, v in d.get("extensions", {}).items() if v.get("composer", "").split("/")[0] not in vendors}
+    order = {"updated": 0, "added": 1, "removed": 2}
+    rows = []
+    for cur, prev in zip(snaps, snaps[1:]):
+        new, old, t = cur["data"], prev["data"], cur["t"]
+        if old.get("typo3") != new.get("typo3"):
+            rows.append({"t": t, "key": "typo3", "title": "TYPO3", "composer": "typo3/cms-core", "core": True,
+                         "old": old.get("typo3"), "new": new.get("typo3"), "action": "updated"})
+        oe, ne, part = exts(old), exts(new), []
+        for k in sorted(set(oe) | set(ne)):
+            o, n = oe.get(k), ne.get(k)
+            if o and n and o.get("version") == n.get("version"):
+                continue
+            src = n or o
+            part.append({"t": t, "key": k, "title": src.get("title", ""), "composer": src.get("composer", ""),
+                         "old": o and o.get("version"), "new": n and n.get("version"),
+                         "action": "added" if not o else "removed" if not n else "updated"})
+        rows += sorted(part, key=lambda r: order[r["action"]])
+    # newest day first; within a day: TYPO3 core first, then updated / added / removed (stable: newest check first)
+    rows.sort(key=lambda r: (not r.get("core"), order[r["action"]]))
+    rows.sort(key=lambda r: r["t"][:10], reverse=True)
+    return rows
+
+
 def _t3m_signature(d):
     """Fields that define a change (status values like times are ignored)."""
     return json.dumps([d.get("typo3"), [d.get(k) for k in T3M_SERVER], {k: v["version"] for k, v in _t3m_public(d).items()},
@@ -280,6 +309,7 @@ def t3m_view(pid, env="production"):
             "current": snaps[0]["data"] if snaps else None,
             "since": snaps[0]["t"] if snaps else None,
             "security": {k: v for k, v in (h.get("security") or {}).items() if k != "reported"} or None,
+            "updates": t3m_update_rows(snaps),
             "history": [{"t": x["t"], "last": x["last"], "changes": x["changes"],
                          "typo3": x["data"].get("typo3")} for x in snaps]}
 

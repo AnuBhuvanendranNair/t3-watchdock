@@ -221,6 +221,12 @@ details.t3env[open]>summary::before{content:"▾"}
 details.t3env[open]>summary{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--bd)}
 tr.upd>td{background:color-mix(in srgb,var(--acc) 8%,transparent)}
 tr.upd.major>td{background:color-mix(in srgb,var(--run) 12%,transparent)}
+.upd-table td{white-space:nowrap}
+.upd-table td.rel-sum{max-width:360px;overflow:hidden;text-overflow:ellipsis}
+.upd-table td.act{text-align:center;color:var(--mut)}
+.upd-table tr.removed td.act{color:var(--err)}
+.upd-table tr.added td.act{color:var(--ok)}
+.upd-table tr.core>td{background:color-mix(in srgb,var(--ok) 16%,transparent);font-weight:600}
 .upd-v{color:var(--acc);font-weight:600}tr.major .upd-v{color:var(--run)}
 .chip.major{background:color-mix(in srgb,var(--run) 22%,transparent);color:var(--run);font-weight:600}
 tr[data-ext]{cursor:pointer}tr[data-ext]:hover>td{box-shadow:inset 0 0 0 999px color-mix(in srgb,var(--fg) 5%,transparent)}
@@ -379,3 +385,13 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 @media (min-width:820px){
   [data-style="focus"] .project-monitoring-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
 }
+
+/* last pipeline status on project cards */
+.runst{display:inline-flex;align-items:center;gap:6px;margin-right:6px;padding:1px 8px;border-radius:10px;background:var(--chip);font-size:14px}
+.runst.active{background:color-mix(in srgb,var(--run) 16%,transparent)}
+.runst.s-manual{background:color-mix(in srgb,var(--acc) 14%,transparent)}
+.runst.s-failed,.runst.s-canceled{background:color-mix(in srgb,var(--err) 14%,transparent)}
+.runst .dot{width:8px;height:8px;border-radius:50%;background:currentColor;animation:runpulse 1.2s ease-in-out infinite}
+@keyframes runpulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.runst .dot{animation:none}}
+.pcard.run-active{border-color:var(--run);box-shadow:0 0 0 1px var(--run)}

@@ -131,6 +131,39 @@ function loadFocusAvatars() {
   });
 }
 
+// Status of each project's last pipeline on the project cards; refreshed every 8 s while one is busy
+// (manual / scheduled = waiting for a person or a time: shown, but refreshed only with the normal 30 s poll)
+let RUNST = {};
+const BUSY = ACTIVE.filter(s => s !== "manual" && s !== "scheduled");
+const RUN_LABEL = {created:"Created", waiting_for_resource:"Waiting for runner", preparing:"Preparing", pending:"Pending",
+  running:"Running", manual:"Waiting for manual job", scheduled:"Scheduled", success:"Passed", failed:"Failed",
+  canceled:"Canceled", skipped:"Skipped"};
+const since = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000));
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+function runStatusHtml(pid) {
+  const r = RUNST[pid];
+  if (!r) return "";
+  if (!r.status) return `<span class="runst" title="${esc(r.error || "")}">status unknown</span>`;
+  const active = BUSY.includes(r.status);
+  const job = r.job ? ` · ${r.job_status === "manual" ? "▶ " : ""}${esc(r.job)}` : "";
+  return `<span class="runst st s-${esc(r.status)}${active ? " active" : ""}">${active ? `<span class="dot" aria-hidden="true"></span>` : ""}${esc(RUN_LABEL[r.status] || r.status)}${job}${active && r.started ? ` · ${esc(since(r.started))}` : ""}</span>`;
+}
+function paintRunStatus() {
+  document.querySelectorAll("[data-runst]").forEach(el => {
+    const r = RUNST[el.dataset.runst];
+    el.innerHTML = runStatusHtml(el.dataset.runst);
+    const card = el.closest(".pcard");
+    if (card) card.classList.toggle("run-active", !!r && BUSY.includes(r.status));
+  });
+}
+async function loadRunStatus() {
+  clearTimeout(loadRunStatus.t);
+  try { RUNST = await api("/api/runs/status"); } catch { return; }
+  if ((location.hash.slice(1) || "/") !== "/") return;
+  paintRunStatus();
+  if (Object.values(RUNST).some(r => BUSY.includes(r.status))) loadRunStatus.t = setTimeout(loadRunStatus, 8000);
+}
+
 function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload needed
   const projectsWithRuns = new Set(S.projects_with_runs || []);
   const cards = S.projects.map(p => {
@@ -153,7 +186,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
         ${a.enabled ? `<span class="chip">TYPO3 ${esc(a.major)} auto-update</span>` : ""}
       </div>
       <div class="srvline" data-srv="${esc(p.id)}"></div>
-      <div class="last">${!hasCI(p) ? "Monitoring only" : last ? `Last run: #${esc(last.pipeline)} · ${esc(fmt(last.t))} · ${esc(last.trigger)}` : "No runs yet"}</div>
+      <div class="last">${!hasCI(p) ? "Monitoring only" : last ? `<span data-runst="${esc(p.id)}">${runStatusHtml(p.id)}</span> Last run: #${esc(last.pipeline)} · ${esc(fmt(last.t))} · ${esc(last.trigger)}` : "No runs yet"}</div>
     </a>
     <article class="pcard focus-project">
       <a class="focus-project-link name" href="${pUrl(p)}">
@@ -165,7 +198,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
       </div>
       <div class="focus-project-run" role="group" aria-label="GitLab CI/CD">
         ${!hasCI(p) ? `<span class="focus-monitor focus-ci is-disabled">CI/CD · Disabled</span>` : last
-          ? `<a class="focus-monitor focus-ci is-configured" href="${pUrl(p)}/pl/${Number(last.pipeline)}" aria-label="Open latest CI/CD run #${esc(last.pipeline)}">CI/CD · #${esc(last.pipeline)}</a>`
+          ? `<a class="focus-monitor focus-ci is-configured" href="${pUrl(p)}/pl/${Number(last.pipeline)}" aria-label="Open latest CI/CD run #${esc(last.pipeline)}">CI/CD · #${esc(last.pipeline)}</a> <span data-runst="${esc(p.id)}">${runStatusHtml(p.id)}</span>`
           : `<span class="focus-monitor focus-ci is-pending">CI/CD · No runs yet</span>`}
       </div>
     </article>`;
@@ -178,6 +211,8 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
     ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">No projects yet. <a href="#/new">Create one</a>.</div>`}
     ${S.projects.length ? `<div class="card full" id="t3sum" style="margin-top:18px"><h2>TYPO3 status – Production &amp; Staging</h2><p class="empty">Loading…</p></div>` : ""}`;
   if (document.documentElement.dataset.style === "focus") loadFocusAvatars();
+  paintRunStatus();
+  if (S.runs.length) loadRunStatus();          // server caches it (8 s active, 5 min finished)
   if (!S.projects.length) return;
   if (!T3SUM) return loadT3mSummary();               // first visit: fetch once
   loadT3mSummary(T3SUM);                             // cached data at once (synchronous, no flash) ...
@@ -485,11 +520,14 @@ async function loadT3m(p, e, refreshNow) {
     <details><summary>All status checks (${c.status.length})</summary><div class="wrap"><table class="checks">
       <thead><tr><th>Severity</th><th>Area</th><th>Check</th><th>Value</th></tr></thead>
       <tbody>${c.status.slice().sort((a, b) => b.severity - a.severity).map(row).join("")}</tbody></table></div></details>
+    ${updHistory(d.updates || [])}
     <details><summary>History (${d.history.length} change${d.history.length === 1 ? "" : "s"})</summary><ul class="tl">
       ${d.history.map(h => `<li><div class="when">${esc(fmt(h.t))}${h.last !== h.t ? ` – seen until ${esc(fmt(h.last))}` : ""} · TYPO3 ${esc(h.typo3 || "?")}</div>
         <ul>${h.changes.map(x => `<li>${esc(x)}</li>`).join("")}</ul></li>`).join("")}
     </ul></details>`);
   box.querySelectorAll("tr[data-ext]").forEach(tr => tr.onclick = () => toggleChangelog(tr));
+  const uh = box.querySelector("details.upd-hist");
+  if (uh) uh.ontoggle = () => uh.open && loadReleaseInfo(uh);
   const sl = box.querySelector(".showLocal");
   if (sl) sl.onchange = () => box.querySelectorAll("tr.local").forEach(r => r.hidden = !sl.checked);
 }
@@ -532,6 +570,34 @@ function mdRender(md, base) {
   }
   if (code !== null) html += `<pre>${esc(code.join("\n"))}</pre>`;
   close(); return html;
+}
+
+// Update history: TYPO3 / extension version changes between t3monitor snapshots (newest first)
+const dmy = s => s ? s.slice(0, 10).split("-").reverse().join(".") : "";
+const UPD_ICON = {updated: ["↻", "updated"], added: ["+", "added"], removed: ["✖", "removed"]};
+function updHistory(rows) {
+  if (!rows.length) return `<details class="upd-hist"><summary>Update history (none yet)</summary><p class="empty">No version changes recorded since the first check.</p></details>`;
+  return `<details class="upd-hist"><summary>Update history (${rows.length})</summary><div class="wrap"><table class="upd-table">
+    <thead><tr><th>Last change</th><th>Old version</th><th></th><th>Inst. version</th><th>Extension key</th><th>Name</th><th>Available since</th><th>Description</th></tr></thead><tbody>
+    ${rows.map(r => { const [ic, lbl] = UPD_ICON[r.action]; const ver = r.new || r.old;
+      return `<tr class="${r.core ? "core" : ""} ${r.action}" ${r.composer && ver ? `data-composer="${esc(r.composer)}" data-version="${esc(ver)}" data-core="${r.core ? 1 : ""}"` : ""}>
+      <td>${esc(dmy(r.t))}</td><td>${esc(r.old || "–")}</td><td class="act" title="${lbl}">${ic}</td><td>${esc(r.new || "–")}</td>
+      <td><code>${esc(r.key)}</code></td><td>${esc(r.title)}</td><td class="rel-time"></td><td class="rel-sum"></td></tr>`; }).join("")}
+    </tbody></table></div><p class="sub" style="margin:6px 0 0">Recorded from t3monitor checks. Available since = release date of the installed version (removed: of the old version) on Packagist; description = first changelog line (GitHub/GitLab).</p></details>`;
+}
+async function loadReleaseInfo(det) {
+  if (det.dataset.loaded) return;
+  det.dataset.loaded = "1";
+  const cache = {};
+  for (const tr of det.querySelectorAll("tr[data-composer]")) {      // one at a time: Packagist/GitHub rate limits
+    const x = tr.dataset, k = x.composer + "@" + x.version;
+    tr.querySelector(".rel-time").textContent = "…";
+    try {
+      cache[k] = cache[k] || await api(`/api/ext/release?composer=${encodeURIComponent(x.composer)}&version=${encodeURIComponent(x.version)}&summary=${x.core ? 0 : 1}`);
+      tr.querySelector(".rel-time").textContent = dmy(cache[k].time) || "–";
+      const s = tr.querySelector(".rel-sum"); s.textContent = cache[k].summary; s.title = cache[k].summary;
+    } catch { tr.querySelector(".rel-time").textContent = "–"; }
+  }
 }
 
 // Extension row click: show/hide the changelog of the latest version (update) or of the installed version
