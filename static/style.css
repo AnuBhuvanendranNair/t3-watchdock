@@ -418,6 +418,16 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 
 
 
+/* one pipeline card per environment */
+.pipe-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.pipe-head h2{margin:0;display:flex;align-items:center;gap:8px}
+.pipe-head h2 code{font-size:13px;font-weight:500}
+.pipe-title{font-weight:600;font-size:15px;margin:8px 0 4px;color:var(--mut)}
+.pipe-prod{border-left:3px solid var(--err)}
+.btn.prod{background:var(--err);color:#fff;border-color:var(--err)}
+.pipe-jobs{margin-top:14px}
+.pipe-jobs>summary{font-size:15px}
+
 /* icons (Lucide sprite in index.html) */
 .ic{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
 .ic.sm{width:14px;height:14px;vertical-align:-2px}

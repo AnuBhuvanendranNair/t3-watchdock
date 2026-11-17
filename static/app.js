@@ -5,7 +5,7 @@ const ic = (name, cls = "") => `<svg class="ic${cls ? " " + cls : ""}" aria-hidd
 // Icon-only button: tooltip and accessible name from one text
 const icBtn = (name, label, attrs = "", cls = "btn sec icon") => `<button type="button" class="${cls}" title="${esc(label)}" aria-label="${esc(label)}" ${attrs}>${ic(name)}</button>`;
 const ACTIVE = ["created","waiting_for_resource","preparing","pending","running","manual","scheduled"];
-let S = null, pollT = null;
+let S = null, pollT = {};
 
 async function api(path, body) {
   const r = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {});
@@ -106,7 +106,7 @@ async function refresh() {
 
 /* ---------------- router ---------------- */
 async function render() {
-  clearTimeout(pollT);
+  Object.values(pollT).forEach(clearTimeout);
   if (!S) await refresh();
   const [a, b, c, d] = (location.hash.slice(1) || "/").split("/").filter(Boolean);
   const navKey = !a || a === "p" || a === "new" ? "projects" : a;
@@ -349,6 +349,14 @@ function viewProject(p, pipelineId) {
   if (!hasCI(p)) return viewProjectNoCI(p);
   const a = p.auto_typo3 || {};
   const runs = S.runs.filter(r => r.project === p.id);
+  // one pipeline card per environment; a run selected in "Recent runs" replaces the latest run of its environment
+  const prodRef = p.production?.ref || "";
+  const isProd = r => prodRef && (r.ref ? r.ref === prodRef : / -> /.test(r.trigger || ""));
+  const sel = pipelineId && runs.find(r => r.pipeline === pipelineId);
+  const pick = prod => (sel && !!isProd(sel) === prod ? sel : runs.find(r => !!isProd(r) === prod))?.pipeline
+    || (pipelineId && !sel && !prod ? pipelineId : null);
+  const envs = [{slot: "stg", label: "Staging", ref: p.ref, mode: "normal", pid: pick(false)}];
+  if (prodRef) envs.push({slot: "prod", label: "Production", ref: prodRef, mode: "production", pid: pick(true)});
   const pid = pipelineId || (runs[0] && runs[0].pipeline);
   $("#view").innerHTML = `
     <div class="crumb"><a href="#/">Projects</a> / ${esc(p.name)}</div>
@@ -356,7 +364,6 @@ function viewProject(p, pipelineId) {
       <div><h1>${esc(p.name)}</h1>
         <div class="sub">${esc(p.path)} · <code>${esc(p.ref)}</code> · <a href="${esc(glUrl(p))}" target="_blank" rel="noopener">GitLab ${ic("ext", "sm")}</a></div></div>
       <div class="actions">
-        ${icBtn("play", "Run pipeline", `data-act="run" data-mode="normal"`, "btn icon")}
         ${a.enabled ? icBtn("update", "Run TYPO3 update (staging pipeline)", `data-act="run" data-mode="update"`) : ""}
         ${icBtn("send", "Send update commands: ready-to-run commands for pending extension updates via Teams / email", `data-act="updsend"`)}
         <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
@@ -365,8 +372,11 @@ function viewProject(p, pipelineId) {
     ${systemOverviewCard()}
     <div class="two">
       <div class="stack">
-        <div class="card"><h2 id="pipeTitle">${pid ? "Pipeline #" + esc(pid) : "Pipeline"}</h2>
-          <div id="pipe">${pid ? `<p class="empty">Loading…</p>` : `<p class="empty">No pipeline started from the launcher yet. Click “Run pipeline”.</p>`}</div></div>
+        ${envs.map(e => `<div class="card pipe-env pipe-${e.slot}">
+          <div class="pipe-head"><h2 title="Branch: ${esc(e.ref)}"><span class="env-l">${e.label}</span>${e.ref.toLowerCase() !== e.label.toLowerCase() ? ` <code>${esc(e.ref)}</code>` : ""}</h2>
+            ${icBtn("play", `Run ${e.label.toLowerCase()}`, `data-act="run" data-mode="${e.mode}"`, `btn icon${e.slot === "prod" ? " prod" : ""}`)}</div>
+          <div class="pipe-title" id="pipeTitle-${e.slot}">${e.pid ? "Pipeline #" + esc(e.pid) : ""}</div>
+          <div id="pipe-${e.slot}">${e.pid ? `<p class="empty">Loading…</p>` : `<p class="empty">No ${e.label.toLowerCase()} pipeline started from the launcher yet.</p>`}</div></div>`).join("")}
         <div class="card"><h2>Recent runs</h2><div class="runs">
           ${runs.map(r => `<a href="${pUrl(p)}/pl/${Number(r.pipeline)}" class="${r.pipeline === pid ? "on" : ""}">
             <span>#${esc(r.pipeline)} · ${esc(r.trigger)}</span><span class="sub">${esc(fmt(r.t))}</span></a>`).join("")
@@ -400,7 +410,7 @@ function viewProject(p, pipelineId) {
     ${T3M_ENVS.map(e => `<details class="card full t3env" id="t3m-${e.env}"><summary>TYPO3 status – ${esc(e.label)}
       <span class="t3meta sub">Loading…</span></summary></details>`).join("")}`;
   $("#view").dataset.project = p.id;
-  if (pid) loadPipeline(p, pid);
+  envs.forEach(e => e.pid && loadPipeline(p, e.pid, e.slot));
   T3M_ENVS.forEach(e => loadT3m(p, e));
   pluginHook("projectPage", p, $("#view"));
 }
@@ -670,27 +680,26 @@ function pipeStepper(jobs) {
     }).join("")}</ol>`;
 }
 
-async function loadPipeline(p, pid) {
-  clearTimeout(pollT);
+async function loadPipeline(p, pid, slot) {
+  clearTimeout(pollT[slot]);
+  const box = $(`#pipe-${slot}`);
   try {
     const d = await api(`/api/pipeline?project=${encodeURIComponent(p.id)}&id=${pid}`);
-    if (!$("#pipe") || $("#view").dataset.project !== p.id) return;
-    $("#pipeTitle").innerHTML = `Pipeline #${esc(pid)} · <span class="st s-${esc(d.pipeline.status)}">${esc(d.pipeline.status)}</span>
+    if (!$(`#pipe-${slot}`) || $("#view").dataset.project !== p.id) return;
+    $(`#pipeTitle-${slot}`).innerHTML = `Pipeline #${esc(pid)} · <span class="st s-${esc(d.pipeline.status)}">${esc(d.pipeline.status)}</span>
       · <a href="${esc(d.pipeline.web_url)}" target="_blank" rel="noopener" title="Open pipeline in GitLab" aria-label="Open pipeline in GitLab">${ic("ext", "sm")}</a>`;
     const jobs = d.jobs.slice().reverse();
-    const det = $("#pipeJobs");
+    const det = $(`#pipeJobs-${slot}`);
     const detOpen = det ? det.open : jobs.some(j => j.status === "failed");
-    $("#pipe").innerHTML = `${pipeStepper(jobs)}
-      <details class="pipe-jobs" id="pipeJobs"${detOpen ? " open" : ""}><summary>Job details (${jobs.length})</summary><div class="wrap"><table><thead><tr><th>Stage</th><th>Job</th><th>Status</th><th></th></tr></thead><tbody>
+    $(`#pipe-${slot}`).innerHTML = `${pipeStepper(jobs)}
+      <details class="pipe-jobs" id="pipeJobs-${slot}"${detOpen ? " open" : ""}><summary>Job details (${jobs.length})</summary><div class="wrap"><table><thead><tr><th>Stage</th><th>Job</th><th>Status</th><th></th></tr></thead><tbody>
       ${jobs.map(j => `<tr><td>${esc(j.stage)}</td><td>${esc(j.name)}</td>
         <td><span class="st s-${esc(j.status)}">${esc(j.status)}</span></td>
         <td>${j.status === "manual" ? `<button class="btn sm" data-act="play" data-job="${Number(j.id)}" data-name="${esc(j.name)}" title="Play ${esc(j.name)}" aria-label="Play ${esc(j.name)}">${ic("play")}</button>` : ""}</td></tr>`).join("")
         || `<tr><td colspan="4" class="empty">No jobs.</td></tr>`}
-      </tbody></table></div></details>
-      ${p.production?.ref && d.pipeline.ref === p.ref && d.pipeline.status === "success"
-        ? `<div class="actions" style="margin-top:12px"><button class="btn" data-act="promote" data-from="${Number(pid)}">🚀 Promote to production (${esc(p.production.ref)})</button></div>` : ""}`;
-    if (ACTIVE.includes(d.pipeline.status)) pollT = setTimeout(() => loadPipeline(p, pid), 5000);
-  } catch (e) { if ($("#pipe")) $("#pipe").innerHTML = `<p class="empty">Error: ${esc(e.message)}</p>`; }
+      </tbody></table></div></details>`;
+    if (ACTIVE.includes(d.pipeline.status)) pollT[slot] = setTimeout(() => loadPipeline(p, pid, slot), 5000);
+  } catch (e) { if (box && $(`#pipe-${slot}`)) $(`#pipe-${slot}`).innerHTML = `<p class="empty">Error: ${esc(e.message)}</p>`; }
 }
 
 // Branch select options: staging/production + GitLab branches + current value
@@ -1090,11 +1099,14 @@ const actions = {
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"});
   },
   async run(el) {
-    const p = proj($("#view").dataset.project), upd = el.dataset.mode === "update";
-    if (!confirm(`Start ${upd ? "TYPO3 update pipeline" : "pipeline"} for ${p.name} (${p.ref})?`)) return;
+    const p = proj($("#view").dataset.project), upd = el.dataset.mode === "update", prod = el.dataset.mode === "production";
+    const msg = prod
+      ? `PRODUCTION: start pipeline for ${p.name} on "${p.production.ref}"?\n\nThis runs independently of staging. Make sure "${p.production.ref}" contains the intended changes (merged in GitLab) — the launcher does not merge.`
+      : `Start ${upd ? "TYPO3 update pipeline" : "staging pipeline"} for ${p.name} (${p.ref})?`;
+    if (!confirm(msg)) return;
     el.disabled = true;
     try { const r = await api("/api/run", {project:p.id, mode:el.dataset.mode}); await refresh();
-      toast(`Pipeline #${r.id} started`); location.hash = `${pUrl(p)}/pl/${r.id}`; }
+      toast(`${prod ? "Production pipeline" : "Pipeline"} #${r.id} started`); location.hash = `${pUrl(p)}/pl/${r.id}`; }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
   async runall(el) {
