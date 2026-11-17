@@ -23,13 +23,14 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.contextMenus.onClicked.addListener(i => { if (i.menuItemId === 'all') chrome.tabs.create({ url: 'batch.html' }); });
 
 // Button "Patchday" auf der Projektseite in T3 Watchdock (über wd-bridge.js) = Klick auf das Symbol
-// Antwort an die Seite: Fehler erscheinen dort als Meldung
+// Klick sofort bestätigen (der Lauf kann Minuten dauern: Dialoge); Ergebnis danach per Nachricht an die Seite (Meldung)
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!(msg && msg.type === 'run' && sender.tab)) return;
+  const tabId = sender.tab.id, back = r => chrome.tabs.sendMessage(tabId, { type: 'patchday:status', ...r }).catch(() => {});
   log('Button', sender.tab.url, msg.project);
-  start(sender.tab, msg.project).then(r => { log('Ende:', r); reply({ ok: true, msg: r ? 'Patchday: ' + r : '' }); },
-    e => { log('Fehler:', e.message); reply({ error: 'Patchday: ' + e.message }); });
-  return true;
+  reply({ started: true });
+  start(sender.tab, msg.project).then(r => { log('Ende:', r); if (r) back({ msg: 'Patchday: ' + r }); },
+    e => { log('Fehler:', e.message); back({ error: 'Patchday: ' + e.message }); });
 });
 chrome.action.onClicked.addListener(tab => start(tab));
 
