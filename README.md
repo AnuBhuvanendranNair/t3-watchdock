@@ -24,11 +24,11 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 - **Project list** — GitLab projects (path + branch) managed in the UI, stored in `config.json`
 - **Project form pre-fill** — new projects start with defaults (staging/production, `build:main`, TYPO3 13, `TARGET_TASK_NAME=shup01`); branch, production branch and TYPO3 major are select boxes; when GitLab is reachable, project path search plus name, branches, manual jobs (CI lint) and TYPO3 major are read from GitLab
 - **Export / import projects** — *Settings → Export / import projects* writes all projects including their t3monitor keys and Basic auth passwords to one JSON file and reads such a file again (existing projects are skipped unless *Overwrite* is ticked). The GitLab token, Teams webhook URL and SMTP password are never exported
-- **Run pipelines** — normal run or "TYPO3 update" run, each with its own CI variables
-- **Run all** — start the normal pipeline of every project with CI/CD at once (one confirmation, failures reported per project)
+- **Run pipelines** — the project page has one card for staging and one for production, each with its own ▶ button (*Run staging*, *Run production*) and its latest pipeline; plus the "TYPO3 update" run (header icon), each with its own CI variables
+- **Run all** — ▶ on the Projects page starts the normal (non-production) pipeline of every project with CI/CD at once (one confirmation, failures reported per project)
 - **Projects without CI/CD** — untick *Uses GitLab CI/CD* in the project form: no pipelines, no TYPO3 auto-update, no *Run all*; the project page shows only the TYPO3 status (t3monitor). Path and branch are optional; with a branch, extension update messages contain ready-to-run commands, without one they only list the updates
-- **Promote to production** — after a successful pipeline on the staging branch, start a pipeline on the production branch (see below)
-- **Job view** — pipeline status and jobs; play manual jobs with one click
+- **Production pipelines** — started directly from the production card, independent of staging (see below)
+- **Pipeline progress** — one step per stage (✓ done, spinner running, ✕ failed, ▶ manual job waiting — click ▶ to play it); the job table is in the collapsible *Job details* (opens by itself when a job failed)
 - **Auto-play** — listed manual jobs (e.g. `build:main`) are started automatically once they become playable (polled every 15 s, max. 2 h)
 - **TYPO3 watcher** — checks `get.typo3.org` for the latest release of a major version on the schedule set in *Scheduler*; on a new version it announces the update in Teams, then triggers the pipeline of every project with `auto_typo3.enabled` (plus a macOS notification when not running in Docker)
   - First check only stores a baseline, it does not trigger
@@ -36,13 +36,16 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 - **Notifications (Microsoft Teams, email)** — when a pipeline started by the TYPO3 watcher has finished (success, failed, canceled, skipped), a Teams message and/or email with status and link is sent; also when the auto-trigger could not start the pipeline. The t3monitor check sends a summary per scheduled run and alerts on new findings (see below). Set up in *Settings*
 - **TYPO3 status (t3monitor)** — reads TYPO3 version, extensions and status checks from sites with the [t3monitor](https://github.com/BrainAppeal/t3monitor) extension, plus server info (PHP, database, web server, OS kernel without hostname), for the production and (optionally) the staging instance of a project; shown on the project page with a change history (see below)
 - **Extension updates & changelogs** — newest compatible release per extension from Packagist (major updates marked separately); click an extension row to read the changelog of that release
-- **TYPO3 overview on the home page** — table with TYPO3 version (↑ = update available), PHP / database / web server versions and errors/warnings of production and staging per project, *versions differ* / *PHP differs* markers and the oldest last check; data from the last t3monitor check
+- **Projects page** — switch between *grid* (project cards) and *list* (TYPO3 overview table), remembered per browser; filter icon opens a two-step filter (technology → version: TYPO3 major, PHP, database, web server, OS; a project matches if production or staging matches); refresh icon re-checks the TYPO3 status of every monitored site (4 at a time)
+- **Refresh progress** — every refresh icon fills from bottom to top while it works (finished sites plus an estimate for the ones in flight)
+- **TYPO3 overview on the home page** — table (list view) with TYPO3 version (↑ = update available), PHP / database / web server versions and errors/warnings of production and staging per project, *versions differ* / *PHP differs* markers and the oldest last check; data from the last t3monitor check
 - **PHP version & security advisories** — scheduled check of every instance: PHP version against [endoflife.date](https://endoflife.date/php) (*end of life*, *security fixes only*, newer patch release available) and TYPO3 core (`typo3/cms-core`) plus public extensions against the [Packagist security advisories](https://packagist.org/apidoc#list-security-advisories) (FriendsOfPHP, GitHub). Uses the data of the last t3monitor check (no extra request to the sites). Results: *Security* section on the project page, *SA* / *PHP* badges in the overview; Teams/email message only for findings not reported before
 - **Scheduler** — page to set when the TYPO3 release check, the t3monitor check and the security check run: every N hours or daily at a fixed time on chosen weekdays; shows last run, result and next run, with *Run now*
 - **Run history & log** — kept in `state.json` (last 100 runs, 200 log entries)
 - **Save & close** — Scheduler and Settings forms have *Save* (stay on the page) and *Save & close* (back to Projects)
 - **Flash messages** — results and errors appear top right (green ✓ / red ⚠; 6 s, errors 12 s; click to close)
-- **Dark / light theme** — switch in the header: *◐ Auto* (follows the system setting) → *☀ Light* → *☾ Dark*; the choice is saved in the browser (`localStorage`) and applied before the page is drawn
+- **Icon buttons** — actions are icons with a tooltip (also the accessible name); icon set: [Lucide](https://lucide.dev), see *Icons*
+- **Dark / light theme** — switch in the header: monitor icon *Auto* (follows the system setting) → sun *Light* → moon *Dark*; the choice is saved in the browser (`localStorage`) and applied before the page is drawn
 - **Focus style** — choose *Focus* in the header style selector for a quieter layout with less repeated copy. It follows the Auto, Light, or Dark setting and is saved per browser.
 - **Terminal style** — monospace font everywhere (system SF Mono/Menlo, no web fonts), square corners, outlined buttons, `$ ~/t3 watchdock` prompt with blinking cursor, `#`/`##` heading prefixes and `./` nav links; *Dark* = phosphor green on black, *Light* = paper terminal; saved per browser
 - **Turbo C++ style** — classic DOS IDE look in the 16-colour CGA palette — grey menu bar with red hotkey letters and green selection, windows with double borders and centered titles, green buttons with shadow, cyan input fields; *Dark* = blue editor screen, *Light* = grey dialog look
@@ -94,7 +97,7 @@ python3 app.py --no-watch    # TYPO3 release check paused (Scheduler)
 | `projects[].auto_typo3.major` | TYPO3 major version to watch, e.g. `13` |
 | `projects[].auto_typo3.variables` | CI variables for a TYPO3 update run |
 | `projects[].auto_typo3.auto_play` | Manual jobs to auto-play after a TYPO3 update run |
-| `projects[].production.ref` | Production branch; empty = no promote button |
+| `projects[].production.ref` | Production branch; empty = no production card |
 | `projects[].production.variables` | CI variables for the production run |
 | `projects[].production.auto_play` | Manual jobs to auto-play after the production run |
 | `projects[].t3monitor.url` | Site URL with the t3monitor extension; key is stored in `<project-id>.t3monitor-key` |
@@ -131,7 +134,7 @@ Page *Scheduler* (top menu) lists the automatic tasks:
 
 1. In the TYPO3 site: *Admin Tools → Settings → Extension Configuration → t3monitor → encryption_key* (64 characters).
 2. In the launcher: project → **Edit** → *t3monitor – Production* and/or *t3monitor – Staging*: site URL and key → **Save changes**. Each instance has its own key (the staging site has its own `encryption_key`).
-3. The project page shows one collapsible section per instance (*TYPO3 status – Production*, *TYPO3 status – Staging*). Closed, its header shows TYPO3 version, ↑ core update, errors, warnings, extension updates and the last check. Open: status boxes, then the collapsible lists *Extensions*, *Problems* (errors and warnings), *All status checks* and *History*. **↻ Refresh now** fetches immediately; otherwise on the schedule of the *t3monitor check* task in *Scheduler*.
+3. The project page shows a *System overview* tile per instance (TYPO3, PHP, database, web server, error/warning badges, last check). The expand icon (or a badge) opens the **TYPO3 status** modal: site, environment, check time and schedule; a banner (*N errors and M warnings need attention* / *All checks passing*, with *Review problems*); TYPO3, Security, Extensions, *Unchanged since*; server chips; and the expandable rows *Problems*, *Security* (only with findings), *All status checks*, *Extensions*, *Update history* and *Change history*. The refresh icon in the modal fetches that instance immediately, the one in the page header both instances; otherwise on the schedule of the *t3monitor check* task in *Scheduler*.
 4. The home page shows all projects in one table (production and staging side by side).
 
 - Request: `?t3monitor=1&secret=<first 32 chars of the key>&reports=internal,security,installed_extensions,system`; the answer is AES-encrypted with the last 32 chars (never sent), decrypted with `openssl`.
@@ -155,9 +158,9 @@ Anyone who has the webhook URL can post into the channel — treat it like a pas
 Email (optional, needs SMTP access): *Settings → Email notifications*: SMTP host, port, security, optional user/password, sender, recipients, tick *Send email notifications*, **Save & send test email**.
 
 - Before the staging pipelines of a new TYPO3 release start, one message "New TYPO3 x released: starting update on staging" lists all affected projects (sent once per project and version, not again on retries).
-- Only pipelines started automatically by the TYPO3 watcher are watched (not manual runs, Run all or promote).
+- Only pipelines started automatically by the TYPO3 watcher are watched (not manual runs, Run all or production runs).
 - **t3monitor check, scheduled run** (also *Run now* in Scheduler): **one summary message per run** with every site (production and staging): TYPO3 version, errors, warnings, extension updates (`NEW` = first time reported, `MAJOR` = may contain breaking changes), new errors, and sites whose check failed.
-- **t3monitor, ↻ Refresh now** on a project: a message only when something is new for that site — the check failed (once per new error text), new errors appeared (the first check of a site is the baseline), or a new extension update was found. Each extension version is reported as new only once.
+- **t3monitor, refresh icon** on a project (modal, page header or Projects page): a message only when something is new for that site — the check failed (once per new error text), new errors appeared (the first check of a site is the baseline), or a new extension update was found. Each extension version is reported as new only once.
 - Teams Workflow webhooks answer *accepted* (HTTP 202) before the message is posted. If the test message is accepted but does not appear, open the run history of the Workflow in Teams (**Workflows → the flow → Run history**) to see why it failed.
 - The pipeline status is polled every 60 s; the message is sent once it has finished. After 24 h without a final status a "NOT FINISHED" message is sent.
 - If the pipeline could not be started, a "NOT STARTED" message is sent (on every failed retry).
@@ -165,12 +168,13 @@ Email (optional, needs SMTP access): *Settings → Email notifications*: SMTP ho
 - Webhook URL (`.teams-webhook`) and SMTP password (`.smtp-password`) are stored with file mode `600` and never sent to the browser; leave the field empty to keep the stored value.
 - Send errors are written to the Activity log.
 
-## Promote to production
+## Production pipelines
 
-1. Run the staging pipeline (**▶ Run pipeline** or **▶ Run all**) and wait for `success`.
+1. Run the staging pipeline (▶ on the *Staging* card, or ▶ *Run all*) and check the result.
 2. Merge `staging` into the production branch **in GitLab** — the launcher does not merge.
-3. Open the successful staging pipeline in the launcher and click **🚀 Promote to production**.
-4. The server re-checks via GitLab that the source pipeline is a successful staging pipeline, then starts a pipeline on the production branch with the production variables and auto-play jobs.
+3. Click ▶ on the *Production* card (red) and confirm. A pipeline starts on the production branch with the production variables and auto-play jobs (API: `POST /api/run` with `"mode": "production"`).
+
+Staging and production run independently: the launcher no longer requires a successful staging pipeline first, the confirmation dialog is the only safeguard. Runs started by the former *Promote to production* still show in *Recent runs* (as *from #…*, tagged `PROD`).
 
 In the project form, the production branch is pre-filled from GitLab (`production` if it exists, otherwise the default branch) and the production auto-play jobs mirror the staging ones until edited. Run all and the TYPO3 auto-trigger never touch production.
 
@@ -223,6 +227,33 @@ Notes:
 - macOS notifications (TYPO3 auto-trigger) do not work inside the container; use Teams notifications or the Activity log instead.
 - Environment: `LAUNCHER_DATA` (data folder, default: app folder), `LAUNCHER_HOST` (bind address, default `127.0.0.1`), `LAUNCHER_ALLOWED_HOSTS` (extra accepted hostnames, comma-separated), `LAUNCHER_TLS_CERT` / `LAUNCHER_TLS_KEY` / `LAUNCHER_TLS_PORT` (HTTPS listener, default port `8443`).
 
+## Icons
+
+The UI uses [Lucide](https://lucide.dev) icons (ISC licence, copy in `static/icons-LICENSE.txt`), version **lucide-static 1.66.0**. There is no build step and no CDN: the icons used are copied as `<symbol id="i-<name>">` into one inline SVG sprite at the top of `static/index.html`.
+
+| Name in the app | Lucide icon | Used for |
+|---|---|---|
+| `refresh` | `refresh-cw` | Refresh status |
+| `play` | `play` | Run pipeline, play manual job |
+| `update` | `circle-arrow-up` | Run TYPO3 update |
+| `send` | `send` | Send update commands |
+| `edit` | `pencil` | Edit project |
+| `patchday` | `calendar-check` | Patchday plugin |
+| `ext` | `external-link` | External links |
+| `details`, `close` | `maximize-2`, `x` | Open / close the status modal |
+| `err`, `warn`, `ok` | `circle-alert`, `triangle-alert`, `circle-check` | Error / warning badges |
+| `grid`, `list`, `filter`, `chev`, `plus` | `layout-grid`, `list`, `list-filter`, `chevron-down`, `plus` | Projects page |
+| `auto`, `sun`, `moon` | `monitor`, `sun`, `moon` | Theme switch |
+
+Use in `static/app.js`: `ic("refresh")` returns the `<svg>`, `icBtn("refresh", "Tooltip text", 'data-act="…"')` an icon-only button (tooltip = accessible name). Plugins get the same helper as `watchdock.ic`.
+
+Add an icon:
+
+1. Find it on [lucide.dev/icons](https://lucide.dev/icons), e.g. [lucide.dev/icons/refresh-cw](https://lucide.dev/icons/refresh-cw).
+2. Open the SVG of the pinned version, e.g. `https://unpkg.com/lucide-static@1.66.0/icons/refresh-cw.svg`.
+3. Copy the elements inside `<svg>…</svg>` into a new `<symbol id="i-<name>" viewBox="0 0 24 24">…</symbol>` in the sprite. Stroke, width and caps come from the `.ic` class in `style.css`.
+4. Use it with `ic("<name>")`. When updating the Lucide version, change the version in the sprite comment and here.
+
 ## Plugins
 
 Optional, team-specific features live in `plugins/<name>/` and stay off until switched on in `config.json`:
@@ -267,7 +298,7 @@ Switched off (or missing) plugins answer `404` and load nothing. `config.json` i
 | `watchdock/scheduler.py` | Background scheduler |
 | `watchdock/server.py` | HTTP server and API routes |
 | `watchdock/plugins.py` | Plugin loader (routes and browser files of enabled plugins) |
-| `static/` | Web UI (`index.html`, `style.css`, `app.js`) |
+| `static/` | Web UI (`index.html` with the icon sprite, `style.css`, `app.js`, `icons-LICENSE.txt`) |
 | `plugins/` | Optional plugins, off by default (see *Plugins*) |
 | `config.example.json` | Example configuration |
 | `Dockerfile`, `compose.yaml` | Docker setup |
