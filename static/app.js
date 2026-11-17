@@ -644,6 +644,32 @@ async function toggleChangelog(tr) {
   } catch (e) { box.innerHTML = `<p class="empty">Changelog not available: ${esc(e.message)}</p>`; }
 }
 
+// Pipeline progress: one step per stage (in run order), with spinner while running
+const STEP_ICON = {success: "✓", failed: "✕", canceled: "✕", manual: "▶", skipped: "–", pending: ""};
+function stageState(list) {
+  const has = s => list.some(j => j.status === s);
+  if (has("failed")) return "failed";
+  if (list.some(j => ["running", "preparing"].includes(j.status))) return "running";
+  if (has("canceled")) return "canceled";
+  if (list.every(j => ["success", "skipped"].includes(j.status))) return list.every(j => j.status === "skipped") ? "skipped" : "success";
+  if (has("manual")) return "manual";
+  if (has("success")) return "running";   // partly done, rest waiting
+  return "pending";
+}
+function pipeStepper(jobs) {
+  if (!jobs.length) return "";
+  const stages = [];
+  jobs.forEach(j => { let st = stages.find(x => x.name === j.stage); if (!st) stages.push(st = {name: j.stage, jobs: []}); st.jobs.push(j); });
+  return `<ol class="psteps">${stages.map(st => {
+      const s = stageState(st.jobs), ok = st.jobs.filter(j => j.status === "success").length;
+      const m = s === "manual" && st.jobs.find(j => j.status === "manual");   // manual stage: icon plays its (first) manual job
+      return `<li class="pstep p-${s}" title="${esc(st.jobs.map(j => `${j.name}: ${j.status}`).join("\n"))}">
+        ${m ? `<button class="pico pplay" data-act="play" data-job="${Number(m.id)}" data-name="${esc(m.name)}" title="Play ${esc(m.name)}" aria-label="Play ${esc(m.name)}">${ic("play")}</button>`
+          : `<span class="pico" aria-hidden="true">${s === "running" ? `<span class="spin"></span>` : STEP_ICON[s] ?? ""}</span>`}
+        <span class="pname">${esc(st.name)}</span><span class="sub">${ok}/${st.jobs.length}</span></li>`;
+    }).join("")}</ol>`;
+}
+
 async function loadPipeline(p, pid) {
   clearTimeout(pollT);
   try {
@@ -651,12 +677,16 @@ async function loadPipeline(p, pid) {
     if (!$("#pipe") || $("#view").dataset.project !== p.id) return;
     $("#pipeTitle").innerHTML = `Pipeline #${esc(pid)} · <span class="st s-${esc(d.pipeline.status)}">${esc(d.pipeline.status)}</span>
       · <a href="${esc(d.pipeline.web_url)}" target="_blank" rel="noopener" title="Open pipeline in GitLab" aria-label="Open pipeline in GitLab">${ic("ext", "sm")}</a>`;
-    $("#pipe").innerHTML = `<div class="wrap"><table><thead><tr><th>Stage</th><th>Job</th><th>Status</th><th></th></tr></thead><tbody>
-      ${d.jobs.slice().reverse().map(j => `<tr><td>${esc(j.stage)}</td><td>${esc(j.name)}</td>
+    const jobs = d.jobs.slice().reverse();
+    const det = $("#pipeJobs");
+    const detOpen = det ? det.open : jobs.some(j => j.status === "failed");
+    $("#pipe").innerHTML = `${pipeStepper(jobs)}
+      <details class="pipe-jobs" id="pipeJobs"${detOpen ? " open" : ""}><summary>Job details (${jobs.length})</summary><div class="wrap"><table><thead><tr><th>Stage</th><th>Job</th><th>Status</th><th></th></tr></thead><tbody>
+      ${jobs.map(j => `<tr><td>${esc(j.stage)}</td><td>${esc(j.name)}</td>
         <td><span class="st s-${esc(j.status)}">${esc(j.status)}</span></td>
         <td>${j.status === "manual" ? `<button class="btn sm" data-act="play" data-job="${Number(j.id)}" data-name="${esc(j.name)}" title="Play ${esc(j.name)}" aria-label="Play ${esc(j.name)}">${ic("play")}</button>` : ""}</td></tr>`).join("")
         || `<tr><td colspan="4" class="empty">No jobs.</td></tr>`}
-      </tbody></table></div>
+      </tbody></table></div></details>
       ${p.production?.ref && d.pipeline.ref === p.ref && d.pipeline.status === "success"
         ? `<div class="actions" style="margin-top:12px"><button class="btn" data-act="promote" data-from="${Number(pid)}">🚀 Promote to production (${esc(p.production.ref)})</button></div>` : ""}`;
     if (ACTIVE.includes(d.pipeline.status)) pollT = setTimeout(() => loadPipeline(p, pid), 5000);
