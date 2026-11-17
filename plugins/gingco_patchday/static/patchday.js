@@ -24,7 +24,8 @@
 
   // result from the extension (via its bridge): show errors
   window.addEventListener("message", e => {
-    if (e.source === window && e.origin === location.origin && e.data?.type === "patchday:status" && e.data.error) toast(e.data.error, true);
+    if (e.source !== window || e.origin !== location.origin || e.data?.type !== "patchday:status") return;
+    if (e.data.error) toast(e.data.error, true); else if (e.data.msg) toast(e.data.msg);
   });
 
   window.watchdock.register({projectPage});

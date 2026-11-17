@@ -3,7 +3,14 @@ importScripts('shared.js'); // OP, getCfg, opEditUrl, readWD, writeOP, syncBridg
 const LS = chrome.storage.local, SS = chrome.storage.session;
 const run = (tabId, func, args = [], world = 'ISOLATED') =>
   chrome.scripting.executeScript({ target: { tabId }, func, args, world }).then(r => r[0] && r[0].result).catch(e => { run.err = e.message; console.warn('Patchday:', e.message); return null; });
-const ask = (tabId, msg, def = '') => run(tabId, (m, d) => prompt(m, d), [msg, def]);
+// Eingabedialog im Tab; null = Abbrechen. Kann der Dialog nicht gezeigt werden -> Fehler (nicht still als Abbrechen werten)
+const ask = async (tabId, msg, def = '') => {
+  run.err = '';
+  const r = await run(tabId, (m, d) => prompt(m, d), [msg, def]);
+  if (r === null && run.err) throw new Error('Eingabedialog nicht möglich: ' + run.err);
+  return r;
+};
+const log = (...a) => console.log('[Patchday]', ...a);
 const say = (tabId, msg) => run(tabId, m => alert(m), [msg]);
 const hostOf = u => { try { return new URL(u).host; } catch (e) { return ''; } };
 const PK = id => 'p' + id;
@@ -19,7 +26,9 @@ chrome.contextMenus.onClicked.addListener(i => { if (i.menuItemId === 'all') chr
 // Antwort an die Seite: Fehler erscheinen dort als Meldung
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!(msg && msg.type === 'run' && sender.tab)) return;
-  start(sender.tab, msg.project).then(() => reply({ ok: true }), e => reply({ error: 'Patchday: ' + e.message }));
+  log('Button', sender.tab.url, msg.project);
+  start(sender.tab, msg.project).then(r => { log('Ende:', r); reply({ ok: true, msg: r ? 'Patchday: ' + r : '' }); },
+    e => { log('Fehler:', e.message); reply({ error: 'Patchday: ' + e.message }); });
   return true;
 });
 chrome.action.onClicked.addListener(tab => start(tab));
@@ -32,9 +41,10 @@ async function start(tab, project) {
     await SS.remove(PK(tab.id));
     return run(tab.id, writeOP, [p.data, p.cfg], 'MAIN');
   }
-  if (!/^https?:/.test(tab.url || '')) return; // z. B. chrome://-Seiten: dort darf nichts eingeblendet werden
+  if (!/^https?:/.test(tab.url || '')) return 'Seite nicht lesbar (' + (tab.url || 'keine URL – Website-Zugriff prüfen') + ')'; // z. B. chrome://-Seiten
 
   const d = await run(tab.id, readWD, [project || ''], 'MAIN');
+  log('Daten:', d);
   if (d === null) throw new Error('Die Erweiterung kann diese Seite nicht lesen (' + (run.err || 'kein Zugriff') + '). Website-Zugriff der Erweiterung in chrome://extensions prüfen.');      // Projektseite in T3 Watchdock (#/p/<id>)
   if (!d || d.error) return say(tab.id, (d && d.error) || 'Fehler beim Lesen aus T3 Watchdock.');
   const cfg = await getCfg();
@@ -44,14 +54,14 @@ async function start(tab, project) {
   if (!op) {   // noch keine Zuordnung: einmal fragen und in den Einstellungen speichern
     op = await ask(tab.id, 'Website: ' + d.domain + ' (' + d.site + ')\n' + d.cnt + ' Einträge an ' + d.groups.length +
       ' Tagen.\n\nKeine Zuordnung in den Einstellungen. OpenProject-Link (Patchday Protokoll):', '');
-    if (!op || !op.trim()) return;
+    if (!op || !op.trim()) return 'abgebrochen (kein OpenProject-Link).';
     op = op.trim();
     if (m) m.op = op; else cfg.map.push({ domain: d.domain, name: d.site, op });
     await LS.set({ map: cfg.map });
   }
   // Wer führt aus? Eingabe = diese Person(en); leer = Namen aus den Einstellungen (ausgeglichen verteilt)
   const who = await ask(tab.id, 'Ausführung: Wer führt aus?\nMehrere Namen mit Komma trennen.\nLeer lassen = aus Einstellungen: ' + cfg.names.join(', '), '');
-  if (who === null) return; // Abbrechen
+  if (who === null) return 'abgebrochen.';
   const names = who.split(',').map(x => x.trim()).filter(Boolean);
   if (names.length) cfg.names = names;
   const url = opEditUrl(op);
@@ -59,6 +69,8 @@ async function start(tab, project) {
   const nt = (await chrome.tabs.create({ url: 'about:blank', windowId: tab.windowId, index: tab.index + 1, openerTabId: tab.id, active: true })).id;
   await SS.set({ [PK(nt)]: { data: d, cfg: { names: cfg.names, askTime: cfg.askTime }, url, ts: Date.now() } });
   chrome.tabs.update(nt, { url });
+  log('OpenProject:', url);
+  return '';
 }
 
 // Sobald die OpenProject-Bearbeitungsseite geladen ist: automatisch eintragen (genau einmal).
