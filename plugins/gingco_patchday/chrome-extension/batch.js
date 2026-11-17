@@ -61,7 +61,7 @@ const saved = async (tabId, edit) => {
       const edit = opEditUrl(m.op);
       if (base(await open(work.id, edit)) !== edit) return ['Fehler: OpenProject nicht angemeldet oder Seite nicht gefunden', 'err', 1];
       await chrome.tabs.update(work.id, { active: true });
-      const r = await exec(work.id, writeOP, [d, c, { step }], 'MAIN');
+      const r = await exec(work.id, writeOP, [{ ...d, site: d.domain || d.site }, c, { step }], 'MAIN');   // Website-Name = Domain (wie 1.x)
       if (r === 'saved') return (await saved(work.id, edit)) ? ['Gespeichert ✓', 'ok']
         : ['Speichern nicht bestätigt – bitte im Arbeits-Tab prüfen', 'err', 1];
       if (r === 'nothing') return ['Nichts Neues (heute schon eingetragen)', 'ok'];

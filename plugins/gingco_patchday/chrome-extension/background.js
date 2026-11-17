@@ -68,7 +68,8 @@ async function start(tab, project) {
   const url = opEditUrl(op);
   // OpenProject in neuem Tab direkt neben T3 Watchdock öffnen; Daten vor dem Laden ablegen, damit der Auto-Start sie sicher findet
   const nt = (await chrome.tabs.create({ url: 'about:blank', windowId: tab.windowId, index: tab.index + 1, openerTabId: tab.id, active: true })).id;
-  await SS.set({ [PK(nt)]: { data: d, cfg: { names: cfg.names, askTime: cfg.askTime }, url, ts: Date.now() } });
+  // Website-Name im Protokoll = Domain (wie T3Monitor in 1.x) -> kein Warnhinweis auf bestehenden Seiten
+  await SS.set({ [PK(nt)]: { data: { ...d, site: d.domain }, cfg: { names: cfg.names, askTime: cfg.askTime }, url, ts: Date.now() } });
   chrome.tabs.update(nt, { url });
   log('OpenProject:', url);
   return '';
