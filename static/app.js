@@ -194,21 +194,25 @@ const TECH = {
     return m ? `${m[1]}${m[2] ? " " + m[2] : " (version hidden)"}` : ""; }},
   os: {label: "OS", get: x => { const m = String(x.os || "").match(/^([A-Za-z]+)\s+(\d+\.\d+)?/); return m ? `${m[1]}${m[2] ? " " + m[2] : ""}` : ""; }},
 };
-let techFilter = {tech: "", val: "", open: false};
+let techFilter = {tech: "typo3", val: "", open: false};
 const techVals = (pid, tech) => { const x = T3SUM?.[pid] || {};
   return [...new Set(T3M_ENVS.map(e => x[e.env]).filter(y => y?.has_data).map(TECH[tech].get).filter(Boolean))]; };
 const verDesc = (a, b) => { const n = s => (s.match(/[\d.]+$/) || ["0"])[0].split(".").map(Number), A = n(a), B = n(b);
   const pa = a.replace(/[\d.]+$/, ""), pb = b.replace(/[\d.]+$/, "");
   return pa !== pb ? pa.localeCompare(pb) : (B[0] - A[0]) || ((B[1] || 0) - (A[1] || 0)); };
-function paintTechFilter() {
-  const t = $("#tfTech"), v = $("#tfVal"); if (!t || !v) return;
-  if (!techFilter.tech) { v.disabled = true; v.innerHTML = `<option value="">Any version</option>`; return applyTechFilter(); }
+function paintTechFilter() {   // tabs = technology, chips = "All" + versions with project counts
+  const box = $("#tfChips"); if (!box) return;
+  document.querySelectorAll("[data-act=tftab]").forEach(b => { const on = b.dataset.tech === techFilter.tech;
+    b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1; });
   const count = new Map();
   S.projects.forEach(p => techVals(p.id, techFilter.tech).forEach(k => count.set(k, (count.get(k) || 0) + 1)));
   if (techFilter.val && !count.has(techFilter.val)) techFilter.val = "";
-  v.disabled = !count.size;
-  v.innerHTML = `<option value="">${count.size ? `Any ${esc(TECH[techFilter.tech].label)} version` : T3SUM ? "No data" : "Loading…"}</option>`
-    + [...count.keys()].sort(verDesc).map(k => `<option value="${esc(k)}"${k === techFilter.val ? " selected" : ""}>${esc(k)} (${count.get(k)})</option>`).join("");
+  // TYPO3 / PHP: the tab already names the product, so the chip shows the version only
+  const short = k => techFilter.tech === "typo3" || techFilter.tech === "php" ? k.replace(/^\S+ /, "") : k;
+  const chip = (v, label, n) => `<button type="button" class="tchip" data-act="tfval" data-v="${esc(v)}" aria-pressed="${techFilter.val === v}"
+    title="${esc(v ? `${v}: ${n} project${n === 1 ? "" : "s"}` : "All projects")}">${esc(label)}${v ? `<span class="tcount">${n}</span>` : ""}</button>`;
+  box.innerHTML = chip("", "All") + [...count.keys()].sort(verDesc).map(k => chip(k, short(k), count.get(k))).join("")
+    + (count.size ? "" : `<span class="sub tchips-empty">${T3SUM ? "No data" : "Loading…"}</span>`);
   applyTechFilter();
 }
 function applyTechFilter() {
@@ -216,7 +220,6 @@ function applyTechFilter() {
   const show = new Set(on ? S.projects.filter(p => techVals(p.id, tech).includes(val)).map(p => p.id) : []);
   document.querySelectorAll("#view [data-pid]").forEach(el => { el.hidden = on && !show.has(el.dataset.pid); });
   if ($("#tfCount")) $("#tfCount").textContent = on ? `${show.size} of ${S.projects.length} projects` : "";
-  const c = $("[data-act=tfclear]"); if (c) c.hidden = !tech;
 }
 
 // Refresh buttons with a progress fill (bottom → top). Progress lives here, keyed per button purpose, not in the
@@ -307,16 +310,13 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
         ${S.projects.some(hasCI) ? icBtn("play", "Run all: start the main pipeline (not production) of every CI/CD project", `data-act="runall"`, "btn icon") : ""}
         <a class="btn sec icon" href="#/new" title="New project" aria-label="New project">${ic("plus")}</a></div></div>
     ${S.projects.length ? `<div class="tfilter" id="tfBar" role="search" aria-label="Filter projects by technology"${techFilter.open ? "" : " hidden"}>
-      <span class="selw"><select id="tfTech" aria-label="Technology"><option value="">All technologies</option>
-        ${Object.entries(TECH).map(([k, t]) => `<option value="${k}"${techFilter.tech === k ? " selected" : ""}>${t.label}</option>`).join("")}</select>${ic("chev")}</span>
-      <span class="selw"><select id="tfVal" aria-label="Version" disabled><option value="">Any version</option></select>${ic("chev")}</span>
-      <span class="sub" id="tfCount" aria-live="polite"></span>
-      <button type="button" class="btn sec sm icon" data-act="tfclear" title="Clear filter" aria-label="Clear filter" hidden>${ic("close")}</button></div>` : ""}
+      <div class="ttabs" role="tablist" aria-label="Technology">${Object.entries(TECH).map(([k, t]) =>
+        `<button type="button" class="ttab" role="tab" data-act="tftab" data-tech="${k}" aria-controls="tfChips" aria-selected="${techFilter.tech === k}"${techFilter.tech === k ? "" : ' tabindex="-1"'}>${t.label}</button>`).join("")}</div>
+      <div class="tchips-row"><div class="tchips" id="tfChips" role="tabpanel" aria-label="Version"></div>
+        <span class="sub" id="tfCount" aria-live="polite"></span></div></div>` : ""}
     ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">No projects yet. <a href="#/new">Create one</a>.</div>`}
     ${S.projects.length ? `<div class="card full" id="t3sum" style="margin-top:18px"><h2>TYPO3 status – Production &amp; Staging</h2><p class="empty">Loading…</p></div>` : ""}`;
   $("#view").dataset.pview = projView();
-  $("#tfTech")?.addEventListener("change", ev => { techFilter = {tech: ev.target.value, val: "", open: true}; paintTechFilter(); });
-  $("#tfVal")?.addEventListener("change", ev => { techFilter.val = ev.target.value; applyTechFilter(); });
   paintTechFilter();
   if (document.documentElement.dataset.style === "focus") loadFocusAvatars();
   paintRunStatus();
@@ -1235,11 +1235,12 @@ function viewScheduler() {
 
 /* ---------------- actions ---------------- */
 const actions = {
-  tfclear() { techFilter = {...techFilter, tech: "", val: ""}; if ($("#tfTech")) $("#tfTech").value = ""; paintTechFilter(); },
+  tftab(el) { techFilter = {...techFilter, tech: el.dataset.tech, val: ""}; paintTechFilter(); el.focus(); },
+  tfval(el) { techFilter.val = el.dataset.v; document.querySelectorAll("[data-act=tfval]").forEach(b => b.setAttribute("aria-pressed", String(b === el))); applyTechFilter(); },
   tftoggle(el) {   // off = hide the bar and clear the filter
-    const open = !techFilter.open; techFilter = open ? {...techFilter, open} : {tech: "", val: "", open};
+    const open = !techFilter.open; techFilter = open ? {...techFilter, open} : {tech: "typo3", val: "", open};
     $("#tfBar").hidden = !open; el.classList.toggle("on", open); el.setAttribute("aria-expanded", String(open));
-    if (open) $("#tfTech").focus(); else { $("#tfTech").value = ""; paintTechFilter(); }
+    if (open) $("[data-act=tftab][aria-selected=true]")?.focus(); else paintTechFilter();
   },
   pview(el) {
     const v = el.dataset.v; try { localStorage.setItem("projectsView", v); } catch (e) {}
@@ -1381,6 +1382,12 @@ const actions = {
     try { await api("/api/token/delete", {}); await refresh(); viewSettings(); toast("Token removed"); } catch (e) { toast(e.message, true); }
   },
 };
+document.addEventListener("keydown", e => {
+  const t = e.target.closest?.("[data-act=tftab]"); if (!t || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+  const tabs = [...document.querySelectorAll("[data-act=tftab]")], i = tabs.indexOf(t);
+  const n = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  e.preventDefault(); actions.tftab(tabs[n]);
+});
 document.addEventListener("click", e => {
   // click on the modal backdrop (outside the dialog box) closes it
   if (e.target.matches("dialog.t3dlg")) { const r = e.target.getBoundingClientRect();

@@ -36,7 +36,7 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 - **Notifications (Microsoft Teams, email)** — when a pipeline started by the TYPO3 watcher has finished (success, failed, canceled, skipped), a Teams message and/or email with status and link is sent; also when the auto-trigger could not start the pipeline. The t3monitor check sends a summary per scheduled run and alerts on new findings (see below). Set up in *Settings*
 - **TYPO3 status (t3monitor)** — reads TYPO3 version, extensions and status checks from sites with the [t3monitor](https://github.com/BrainAppeal/t3monitor) extension, plus server info (PHP, database, web server, OS kernel without hostname), for the production and (optionally) the staging instance of a project; shown on the project page with a change history (see below)
 - **Extension updates & changelogs** — newest compatible release per extension from Packagist (major updates marked separately); click an extension row to read the changelog of that release
-- **Projects page** — switch between *grid* (project cards) and *list* (TYPO3 overview table), remembered per browser; filter icon opens a two-step filter (technology → version: TYPO3 major, PHP, database, web server, OS; a project matches if production or staging matches); refresh icon re-checks the TYPO3 status of every monitored site (4 at a time)
+- **Projects page** — switch between *grid* (project cards) and *list* (TYPO3 overview table), remembered per browser; filter icon opens tabs per technology (TYPO3, PHP, Database, Web server, OS) with one chip per version and its project count (*All* = no filter; TYPO3 by major, the rest by product + major.minor; a project matches if production or staging matches); refresh icon re-checks the TYPO3 status of every monitored site (4 at a time)
 - **Refresh progress** — every refresh icon fills from bottom to top while it works (finished sites plus an estimate for the ones in flight)
 - **TYPO3 overview on the home page** — table (list view) with TYPO3 version (↑ = update available), PHP / database / web server versions and errors/warnings of production and staging per project, *versions differ* / *PHP differs* markers and the oldest last check; data from the last t3monitor check
 - **PHP version & security advisories** — scheduled check of every instance: PHP version against [endoflife.date](https://endoflife.date/php) (*end of life*, *security fixes only*, newer patch release available) and TYPO3 core (`typo3/cms-core`) plus public extensions against the [Packagist security advisories](https://packagist.org/apidoc#list-security-advisories) (FriendsOfPHP, GitHub). Uses the data of the last t3monitor check (no extra request to the sites). Results: *Security* section on the project page, *SA* / *PHP* badges in the overview; Teams/email message only for findings not reported before
@@ -242,7 +242,8 @@ The UI uses [Lucide](https://lucide.dev) icons (ISC licence, copy in `static/ico
 | `ext` | `external-link` | External links |
 | `details`, `close` | `maximize-2`, `x` | Open / close the status modal |
 | `err`, `warn`, `ok` | `circle-alert`, `triangle-alert`, `circle-check` | Error / warning badges |
-| `grid`, `list`, `filter`, `chev`, `plus` | `layout-grid`, `list`, `list-filter`, `chevron-down`, `plus` | Projects page |
+| `grid`, `list`, `filter`, `plus` | `layout-grid`, `list`, `list-filter`, `plus` | Projects page |
+| `chev` | `chevron-down` | Expandable rows in the status modal |
 | `auto`, `sun`, `moon` | `monitor`, `sun`, `moon` | Theme switch |
 
 Use in `static/app.js`: `ic("refresh")` returns the `<svg>`, `icBtn("refresh", "Tooltip text", 'data-act="…"')` an icon-only button (tooltip = accessible name). Plugins get the same helper as `watchdock.ic`.

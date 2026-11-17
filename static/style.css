@@ -497,13 +497,25 @@ button.hchip:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.btn.fill::before{transition:none}}
 
 /* Projects page: technology filter */
-.tfilter{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:0 0 16px}
+.tfilter{margin:0 0 20px}
+/* filter toggle: accent fill while the filter bar is open (also beats the style themes' .btn.sec rules) */
+.btn.sec.icon.on,[data-style] .btn.sec.icon.on{background:var(--acc);border-color:var(--acc);color:var(--acc-fg)}
+.btn.sec.icon.on:hover:not(:disabled){filter:brightness(1.1)}
 .tfilter[hidden]{display:none}
-.selw{position:relative;display:inline-flex;align-items:center}
-.tfilter select{width:auto;min-width:200px;max-width:100%;appearance:none;-webkit-appearance:none;padding-right:36px;cursor:pointer}
-.selw>.ic{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--mut);pointer-events:none;vertical-align:0}
-.btn.icon.on{background:var(--chip);border-color:var(--acc);color:var(--acc)}
-.tfilter select:disabled{opacity:.55}
+.ttabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--bd);margin-bottom:14px}
+.ttab{font:inherit;font-size:15px;font-weight:600;padding:10px 18px;margin-bottom:-1px;border:0;border-bottom:2px solid transparent;background:none;color:var(--mut);cursor:pointer}
+.ttab:hover{color:var(--fg)}
+.ttab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--fg)}
+.ttab:focus-visible{outline:2px solid var(--acc);outline-offset:-2px;border-radius:6px 6px 0 0}
+.tchips-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+.tchips{display:inline-flex;flex-wrap:wrap;gap:4px;padding:5px;border-radius:12px;background:var(--chip)}
+.tchip{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:15px;font-weight:600;padding:8px 16px;border:0;border-radius:9px;background:none;color:var(--fg);cursor:pointer}
+.tchip:hover{background:var(--hover)}
+.tchip[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.tchip:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.tcount{font-size:12px;font-weight:600;min-width:20px;padding:2px 7px;border-radius:999px;background:color-mix(in srgb,var(--fg) 10%,transparent);color:var(--mut);text-align:center}
+.tchip[aria-pressed="true"] .tcount{background:color-mix(in srgb,var(--bg) 18%,transparent);color:var(--bg)}
+.tchips-empty{padding:8px 10px}
 #view [data-pid][hidden]{display:none!important}
 
 /* TYPO3 status modal — calm redesign */
