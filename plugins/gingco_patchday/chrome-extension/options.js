@@ -27,6 +27,7 @@ $('save').onclick = async () => {
   try { new URL(wd); } catch (e) { return flash('Ungültige T3-Watchdock-Adresse.'); }
   // Zugriff auf T3 Watchdock für "Alle ausführen" und "Projekte laden" (Klick auf das Symbol braucht ihn nicht)
   const ok = await askAccess(wd);
+  await syncBridge(wd).catch(() => {});                 // Button "Patchday" in T3 Watchdock
   const map = readMap().filter(m => m.id && m.op);
   chrome.storage.local.set({ names, askTime: $('askTime').checked, wd, map }, () =>
     flash(ok ? 'Gespeichert.' : 'Gespeichert – ohne Zugriff auf T3 Watchdock funktionieren „Alle ausführen“ und „Projekte laden“ nicht.'));

@@ -1,5 +1,5 @@
 // Patchday 2.0 – Ein Klick auf der Projektseite in T3 Watchdock: Daten lesen -> OpenProject öffnen -> automatisch eintragen.
-importScripts('shared.js'); // OP, getCfg, opEditUrl, readWD, writeOP
+importScripts('shared.js'); // OP, getCfg, opEditUrl, readWD, writeOP, syncBridge
 const LS = chrome.storage.local, SS = chrome.storage.session;
 const run = (tabId, func, args = [], world = 'ISOLATED') =>
   chrome.scripting.executeScript({ target: { tabId }, func, args, world }).then(r => r[0] && r[0].result).catch(e => { console.warn('Patchday:', e.message); return null; });
@@ -9,10 +9,17 @@ const hostOf = u => { try { return new URL(u).host; } catch (e) { return ''; } }
 const PK = id => 'p' + id;
 
 // Rechtsklick auf das Symbol -> "Alle ausführen" (Fortschrittsseite steuert den Lauf)
-chrome.runtime.onInstalled.addListener(() => chrome.contextMenus.create({ id: 'all', title: 'Alle ausführen', contexts: ['action'] }));
+chrome.runtime.onInstalled.addListener(async () => {
+  chrome.contextMenus.create({ id: 'all', title: 'Alle ausführen', contexts: ['action'] });
+  syncBridge((await getCfg()).wd).catch(() => {});      // Button "Patchday" in T3 Watchdock (nach Update/Reload neu registrieren)
+});
 chrome.contextMenus.onClicked.addListener(i => { if (i.menuItemId === 'all') chrome.tabs.create({ url: 'batch.html' }); });
 
-chrome.action.onClicked.addListener(async (tab) => {
+// Button "Patchday" auf der Projektseite in T3 Watchdock (über wd-bridge.js) = Klick auf das Symbol
+chrome.runtime.onMessage.addListener((msg, sender) => { if (msg && msg.type === 'run' && sender.tab) start(sender.tab, msg.project); });
+chrome.action.onClicked.addListener(tab => start(tab));
+
+async function start(tab, project) {
   const host = hostOf(tab.url);
   if (host === OP) { // Fallback: manueller Klick auf OpenProject, falls Auto-Start nicht lief
     const p = (await SS.get(PK(tab.id)))[PK(tab.id)];
@@ -22,7 +29,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
   if (!/^https?:/.test(tab.url || '')) return; // z. B. chrome://-Seiten: dort darf nichts eingeblendet werden
 
-  const d = await run(tab.id, readWD, [], 'MAIN');      // Projektseite in T3 Watchdock (#/p/<id>)
+  const d = await run(tab.id, readWD, [project || ''], 'MAIN');      // Projektseite in T3 Watchdock (#/p/<id>)
   if (!d || d.error) return say(tab.id, (d && d.error) || 'Fehler beim Lesen aus T3 Watchdock.');
   const cfg = await getCfg();
   const m = cfg.map.find(x => x.id === d.project);
@@ -45,7 +52,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   const nt = (await chrome.tabs.create({ url: 'about:blank', windowId: tab.windowId, index: tab.index + 1, openerTabId: tab.id, active: true })).id;
   await SS.set({ [PK(nt)]: { data: d, cfg: { names: cfg.names, askTime: cfg.askTime }, url, ts: Date.now() } });
   chrome.tabs.update(nt, { url });
-});
+}
 
 // Sobald die OpenProject-Bearbeitungsseite geladen ist: automatisch eintragen (genau einmal).
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {

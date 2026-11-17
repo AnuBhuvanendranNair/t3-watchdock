@@ -11,14 +11,15 @@ Two parts:
 
 | Part | Purpose |
 |---|---|
-| `plugin.py` | T3 Watchdock plugin (read-only): update history (production) and project list |
+| `plugin.py`, `static/patchday.js` | T3 Watchdock plugin (read-only): update history (production), project list, optional *Patchday* button on the project page |
 | `chrome-extension/` | Chrome extension: settings incl. OpenProject link per project; reads the data from the open T3 Watchdock tab and fills the OpenProject page (editor, duplicate check, time, executor, confirmation before saving — unchanged from 1.4) |
 
 Everything that only the extension needs (names, time option, OpenProject links) is stored in the extension. T3 Watchdock only provides the data.
 
 ## Setup
 
-1. `config.json` of T3 Watchdock: add `"plugins": {"gingco_patchday": {}}` (Docker: rebuild once, `docker compose up -d --build`).
+1. `config.json` of T3 Watchdock: add `"plugins": {"gingco_patchday": {"button": true}}` (Docker: rebuild once, `docker compose up -d --build`).
+   `"button": true` shows a **Patchday** button on the project page; without it, start with the extension icon only.
 2. Chrome: `chrome://extensions` → **Developer mode** → **Load unpacked** → select `plugins/gingco_patchday/chrome-extension`.
    Before removing an old Patchday 1.x: export its settings as CSV. Chrome deletes an extension's settings when it is removed.
 3. Extension options (right-click icon → **Options**): names, time option, T3 Watchdock address (default `http://127.0.0.1:8787`), then **Projekte aus T3 Watchdock laden** and enter the OpenProject link per project. **Speichern** asks Chrome once for access to the T3 Watchdock address.
@@ -26,8 +27,10 @@ Everything that only the extension needs (names, time option, OpenProject links)
 
 ## Workflow
 
-- **One project:** open the project page in T3 Watchdock (`#/p/<id>`) and click the extension icon. T3 Watchdock reads the site again (t3monitor, production), then OpenProject opens next to it and the rows are inserted as before. No link yet → the extension asks once and saves it in its settings.
+- **One project:** open the project page in T3 Watchdock (`#/p/<id>`) and click **Patchday** (button) or the extension icon. T3 Watchdock reads the site again (t3monitor, production), then OpenProject opens next to it and the rows are inserted as before. No link yet → the extension asks once and saves it in its settings.
 - **All projects:** right-click the extension icon → **Alle ausführen**. Runs every mapping in the settings.
+
+**Button → extension:** after **Speichern** in the options (access granted), the extension adds a small script (`wd-bridge.js`) to the T3 Watchdock address. It marks the page (`data-patchday="1"`) and passes the button click to the extension. Pages opened before need a reload. Without the extension the button only shows a message.
 
 ## Data
 
@@ -43,6 +46,7 @@ Everything that only the extension needs (names, time option, OpenProject links)
 |---|---|
 | `GET /api/plugins/gingco_patchday/data?project=<id>&refresh=1` | Update history grouped by day (format of the extension); `refresh=1` reads the site first |
 | `GET /api/plugins/gingco_patchday/projects` | All projects (id, name), for *Projekte laden* |
+| `GET /api/plugins/gingco_patchday/settings` | `{"button": true/false}` for the web UI |
 
 The extension calls these from inside the T3 Watchdock tab (same origin), so T3 Watchdock's Host / Origin checks stay unchanged.
 

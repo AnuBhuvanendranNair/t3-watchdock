@@ -20,6 +20,14 @@ const openWait = (tabId, url) => new Promise(res => {
   chrome.tabs.update(tabId, { url }).catch(() => done(''));
 });
 const wdOrigin = wd => { const u = new URL(wd); return u.protocol + '//' + u.hostname + '/*'; };
+// Brücke für den Button "Patchday" in T3 Watchdock: Skript auf der T3-Watchdock-Adresse registrieren (nur mit Zugriff)
+async function syncBridge(wd) {
+  await chrome.scripting.unregisterContentScripts({ ids: ['wd-bridge'] }).catch(() => {});
+  const origin = wdOrigin(wd);
+  if (!(await chrome.permissions.contains({ origins: [origin] }))) return false;
+  await chrome.scripting.registerContentScripts([{ id: 'wd-bridge', matches: [origin], js: ['wd-bridge.js'], runAt: 'document_idle' }]);
+  return true;
+}
 
 // ---------- läuft im T3-Watchdock-Tab (MAIN world: gleiche Herkunft wie die App) ----------
 // Update-Historie eines Projekts; ohne id = Projekt der geöffneten Projektseite (#/p/<id>)

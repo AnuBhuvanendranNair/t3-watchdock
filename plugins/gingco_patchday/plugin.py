@@ -3,10 +3,11 @@
 The Chrome extension in chrome-extension/ fetches these routes from the open T3 Watchdock tab and writes the data
 into OpenProject; the OpenProject link per project is kept in the extension's options. Switched on in config.json:
 
-    "plugins": {"gingco_patchday": {}}
+    "plugins": {"gingco_patchday": {"button": true}}     # button: "Patchday" button on the project page
 """
 from watchdock.core import config
 from watchdock.gitlab import find_project
+from watchdock.plugins import enabled
 from watchdock.t3monitor import t3m_fetch, t3m_view
 
 
@@ -36,4 +37,9 @@ def projects(q):
     return [{"id": p["id"], "name": p.get("name") or p["id"]} for p in config()["projects"]]
 
 
-GET = {"data": data, "projects": projects}
+def settings(q):
+    """Options of the plugin for the web UI."""
+    return {"button": enabled().get("gingco_patchday", {}).get("button") is True}
+
+
+GET = {"data": data, "projects": projects, "settings": settings}
