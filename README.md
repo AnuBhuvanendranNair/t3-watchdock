@@ -240,7 +240,7 @@ Switched off (or missing) plugins answer `404` and load nothing. `config.json` i
 
 | Plugin | Purpose |
 |---|---|
-| [`gingco_patchday`](plugins/gingco_patchday/README.md) | Gingco Communication only: writes the update history into the Patchday protocol in OpenProject (with the Patchday Chrome extension) |
+| [`gingco_patchday`](plugins/gingco_patchday/README.md) | Gingco Communication only: provides the production update history to the Patchday Chrome extension, which writes it into the Patchday protocol in OpenProject |
 
 ## Security
 

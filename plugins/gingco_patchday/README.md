@@ -11,20 +11,23 @@ Two parts:
 
 | Part | Purpose |
 |---|---|
-| `plugin.py`, `static/patchday.js` | T3 Watchdock plugin: update history per project, OpenProject link per project (*Settings → Patchday*), *Patchday ↗* button on the project page |
-| `chrome-extension/` | Chrome extension: reads the data from the open T3 Watchdock tab and fills the OpenProject page (editor, duplicate check, time, executor, confirmation before saving — unchanged from 1.4) |
+| `plugin.py` | T3 Watchdock plugin (read-only): update history (production) and project list |
+| `chrome-extension/` | Chrome extension: settings incl. OpenProject link per project; reads the data from the open T3 Watchdock tab and fills the OpenProject page (editor, duplicate check, time, executor, confirmation before saving — unchanged from 1.4) |
+
+Everything that only the extension needs (names, time option, OpenProject links) is stored in the extension. T3 Watchdock only provides the data.
 
 ## Setup
 
-1. `config.json` of T3 Watchdock: add `"plugins": {"gingco_patchday": {}}` and reload the page (Docker: rebuild once, `docker compose up -d --build`).
-2. *Settings → Patchday (OpenProject)*: enter the link to the Patchday protocol for each project, click *Save links*.
-3. Chrome: `chrome://extensions` → **Developer mode** → **Load unpacked** → select `plugins/gingco_patchday/chrome-extension`. Remove the old Patchday 1.x extension.
-4. Extension options (right-click icon → **Options**): names, time option, T3 Watchdock address (default `http://127.0.0.1:8787`). **Save** asks Chrome once for access to that address (needed for *Alle ausführen*).
+1. `config.json` of T3 Watchdock: add `"plugins": {"gingco_patchday": {}}` (Docker: rebuild once, `docker compose up -d --build`).
+2. Chrome: `chrome://extensions` → **Developer mode** → **Load unpacked** → select `plugins/gingco_patchday/chrome-extension`.
+   Before removing an old Patchday 1.x: export its settings as CSV. Chrome deletes an extension's settings when it is removed.
+3. Extension options (right-click icon → **Options**): names, time option, T3 Watchdock address (default `http://127.0.0.1:8787`), then **Projekte aus T3 Watchdock laden** and enter the OpenProject link per project. **Speichern** asks Chrome once for access to the T3 Watchdock address.
+4. **CSV exportieren** = backup of all settings incl. links (also to share them with colleagues).
 
 ## Workflow
 
-- **One project:** open the project page in T3 Watchdock (`#/p/<id>`) and click the extension icon. T3 Watchdock reads the site again (t3monitor, production), then OpenProject opens next to it and the rows are inserted as before. No link yet → the extension asks once and saves it in T3 Watchdock.
-- **All projects:** right-click the extension icon → **Alle ausführen**. Runs every project that has an OpenProject link.
+- **One project:** open the project page in T3 Watchdock (`#/p/<id>`) and click the extension icon. T3 Watchdock reads the site again (t3monitor, production), then OpenProject opens next to it and the rows are inserted as before. No link yet → the extension asks once and saves it in its settings.
+- **All projects:** right-click the extension icon → **Alle ausführen**. Runs every mapping in the settings.
 
 ## Data
 
@@ -39,8 +42,7 @@ Two parts:
 | Route | Purpose |
 |---|---|
 | `GET /api/plugins/gingco_patchday/data?project=<id>&refresh=1` | Update history grouped by day (format of the extension); `refresh=1` reads the site first |
-| `GET /api/plugins/gingco_patchday/projects` | All projects with their OpenProject link |
-| `POST /api/plugins/gingco_patchday/links` | `{"links": {"<id>": "https://…"}}`; empty link removes it |
+| `GET /api/plugins/gingco_patchday/projects` | All projects (id, name), for *Projekte laden* |
 
 The extension calls these from inside the T3 Watchdock tab (same origin), so T3 Watchdock's Host / Origin checks stay unchanged.
 
@@ -48,5 +50,5 @@ The extension calls these from inside the T3 Watchdock tab (same origin), so T3 
 
 | Version | Changes |
 |---|---|
-| 2.0 | Data from T3 Watchdock instead of T3Monitor; OpenProject links stored in T3 Watchdock; CSV without mapping rows (1.x mapping rows are ignored on import) |
+| 2.0 | Data from T3 Watchdock instead of T3Monitor; mapping by T3 Watchdock project ID (1.x CSV mapping rows with a T3Monitor UID are ignored on import) |
 | 1.4 | Last stand-alone version (repository `patchday`) |

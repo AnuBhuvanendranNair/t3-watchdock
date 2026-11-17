@@ -3,12 +3,23 @@
 const OP = 'op.hub.gingco.de';
 const DEF_NAMES = ['Siva', 'Anu BN'], DEF_WD = 'http://127.0.0.1:8787';
 const getCfg = async () => {
-  const c = Object.assign({ askTime: true, wd: DEF_WD }, await chrome.storage.local.get(['names', 'askTime', 'wd']));
+  const c = Object.assign({ askTime: true, wd: DEF_WD, map: [] }, await chrome.storage.local.get(['names', 'askTime', 'wd', 'map']));
   if (!Array.isArray(c.names) || !c.names.length) c.names = DEF_NAMES;
+  if (!Array.isArray(c.map)) c.map = [];               // [{id: Projekt-ID in T3 Watchdock, name, op: OpenProject-Link}]
   c.wd = String(c.wd || DEF_WD).trim().replace(/\/+$/, '');
   return c;
 };
 const opEditUrl = op => op.trim().replace(/[?#].*$/, '').replace(/\/+$/, '').replace(/\/edit$/, '') + '/edit';
+
+// Tab auf URL setzen und warten, bis die Seite geladen ist (max. 60 s); Ergebnis = tatsächliche URL (Login-Umleitung erkennbar)
+const openWait = (tabId, url) => new Promise(res => {
+  const l = (id, info, tab) => { if (id === tabId && info.status === 'complete') done(tab.url); };
+  const done = u => { clearTimeout(to); chrome.tabs.onUpdated.removeListener(l); res(u || ''); };
+  const to = setTimeout(() => done(''), 60000);
+  chrome.tabs.onUpdated.addListener(l);
+  chrome.tabs.update(tabId, { url }).catch(() => done(''));
+});
+const wdOrigin = wd => { const u = new URL(wd); return u.protocol + '//' + u.hostname + '/*'; };
 
 // ---------- läuft im T3-Watchdock-Tab (MAIN world: gleiche Herkunft wie die App) ----------
 // Update-Historie eines Projekts; ohne id = Projekt der geöffneten Projektseite (#/p/<id>)
@@ -22,7 +33,7 @@ async function readWD(id) {
     return r.ok ? d : { error: d.error || 'HTTP ' + r.status };
   } catch (e) { return { error: 'T3 Watchdock nicht erreichbar: ' + e.message }; }
 }
-// Alle Projekte mit OpenProject-Link (für "Alle ausführen")
+// Alle Projekte (id, name) – für die Projektliste in den Einstellungen
 async function listWD() {
   try {
     const r = await fetch('/api/plugins/gingco_patchday/projects');
@@ -30,16 +41,6 @@ async function listWD() {
     return r.ok ? d : { error: d.error || 'HTTP ' + r.status };
   } catch (e) { return { error: 'T3 Watchdock nicht erreichbar: ' + e.message }; }
 }
-// OpenProject-Link eines Projekts in T3 Watchdock speichern
-async function saveLinkWD(id, op) {
-  try {
-    const r = await fetch('/api/plugins/gingco_patchday/links', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ links: { [id]: op } }) });
-    const d = await r.json();
-    return r.ok ? d : { error: d.error || 'HTTP ' + r.status };
-  } catch (e) { return { error: e.message }; }
-}
-
 // ---------- läuft auf OpenProject (MAIN world, braucht ckeditorInstance) ----------
 // o.step = "[3/12] " im Lauf "Alle ausführen": Präfix in Dialogen, Rückgabe = Ergebnis für die Fortschrittsseite
 async function writeOP(data, cfg, o = {}) {

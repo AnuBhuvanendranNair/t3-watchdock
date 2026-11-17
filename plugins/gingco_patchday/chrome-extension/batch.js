@@ -1,4 +1,4 @@
-// "Alle ausführen": alle Projekte mit OpenProject-Link nacheinander – aus T3 Watchdock lesen, OpenProject öffnen, writeOP mit Bestätigung je Schritt.
+// "Alle ausführen": alle Zuordnungen aus den Einstellungen nacheinander – aus T3 Watchdock lesen, OpenProject öffnen, writeOP mit Bestätigung je Schritt.
 const $ = id => document.getElementById(id);
 const exec = (tabId, func, args = [], world = 'ISOLATED') =>
   chrome.scripting.executeScript({ target: { tabId }, func, args, world }).then(r => r[0] && r[0].result).catch(e => ({ error: e.message }));
@@ -8,14 +8,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let stop = false;
 $('stop').onclick = () => { stop = true; $('stop').disabled = true; $('stop').textContent = 'Stoppt nach aktueller Website…'; };
 
-// Tab auf URL setzen und warten, bis die Seite geladen ist (max. 60 s); Ergebnis = tatsächliche URL (Login-Umleitung erkennbar)
-const open = (tabId, url) => new Promise(res => {
-  const l = (id, info, tab) => { if (id === tabId && info.status === 'complete') done(tab.url); };
-  const done = u => { clearTimeout(to); chrome.tabs.onUpdated.removeListener(l); res(u || ''); };
-  const to = setTimeout(() => done(''), 60000);
-  chrome.tabs.onUpdated.addListener(l);
-  chrome.tabs.update(tabId, { url }).catch(() => done(''));
-});
+const open = openWait;
 // Nach Klick auf "Speichern": warten, bis die Bearbeitungsseite verlassen wurde (max. 30 s)
 const saved = async (tabId, edit) => {
   for (let i = 0; i < 60; i++) {
@@ -31,22 +24,18 @@ const saved = async (tabId, edit) => {
   const cfg = await getCfg();
   const fail = t => { $('txt').textContent = t; $('stop').hidden = true; };
   let wdUrl; try { wdUrl = new URL(cfg.wd); } catch (e) { return fail('T3-Watchdock-URL in den Einstellungen ungültig.'); }
-  const origin = wdUrl.protocol + '//' + wdUrl.hostname + '/*';
-  if (!(await chrome.permissions.contains({ origins: [origin] })))
+  if (!(await chrome.permissions.contains({ origins: [wdOrigin(cfg.wd)] })))
     return fail('Kein Zugriff auf ' + cfg.wd + ' – bitte in den Einstellungen „Speichern“ klicken und den Zugriff erlauben.');
+  const map = cfg.map.filter(m => m.id && m.op);
+  const n = map.length;
+  if (!n) return fail('Keine Zuordnungen in den Einstellungen.');
   const me = await chrome.tabs.getCurrent();
   const work = await chrome.tabs.create({ url: 'about:blank', windowId: me.windowId, active: false });
   const wdHome = cfg.wd + '/';
-  if (hostOf(await open(work.id, wdHome)) !== wdUrl.host) return fail('T3 Watchdock nicht erreichbar: ' + cfg.wd);
-  const all = await exec(work.id, listWD, [], 'MAIN');
-  if (!all || all.error) return fail('Fehler: ' + ((all && all.error) || 'T3 Watchdock nicht lesbar'));
-  const map = all.filter(m => m.op);
-  const n = map.length;
-  if (!n) return fail('Kein Projekt mit OpenProject-Link in T3 Watchdock (Einstellungen → Patchday).');
   const rows = map.map((m, i) => {
     const tr = $('list').insertRow();
     tr.insertCell().textContent = i + 1;
-    tr.insertCell().textContent = m.name;
+    tr.insertCell().textContent = m.name || m.id;
     const st = tr.insertCell(); st.textContent = 'wartet';
     return st;
   });
@@ -61,7 +50,7 @@ const saved = async (tabId, edit) => {
   let i = 0;
   for (; i < n && !stop; i++) {
     const m = map[i], step = '[' + (i + 1) + '/' + n + '] ';
-    $('txt').textContent = step + m.name;
+    $('txt').textContent = step + (m.name || m.id);
     $('bar').max = n; $('bar').value = i;
     chrome.action.setBadgeText({ text: (i + 1) + '/' + n });
     set(i, 'läuft…', 'run');

@@ -1,5 +1,5 @@
 // Patchday 2.0 – Ein Klick auf der Projektseite in T3 Watchdock: Daten lesen -> OpenProject öffnen -> automatisch eintragen.
-importScripts('shared.js'); // OP, getCfg, opEditUrl, readWD, saveLinkWD, writeOP
+importScripts('shared.js'); // OP, getCfg, opEditUrl, readWD, writeOP
 const LS = chrome.storage.local, SS = chrome.storage.session;
 const run = (tabId, func, args = [], world = 'ISOLATED') =>
   chrome.scripting.executeScript({ target: { tabId }, func, args, world }).then(r => r[0] && r[0].result).catch(e => { console.warn('Patchday:', e.message); return null; });
@@ -25,14 +25,15 @@ chrome.action.onClicked.addListener(async (tab) => {
   const d = await run(tab.id, readWD, [], 'MAIN');      // Projektseite in T3 Watchdock (#/p/<id>)
   if (!d || d.error) return say(tab.id, (d && d.error) || 'Fehler beim Lesen aus T3 Watchdock.');
   const cfg = await getCfg();
-  let op = d.op;
-  if (!op) {
+  const m = cfg.map.find(x => x.id === d.project);
+  let op = m && m.op;
+  if (!op) {   // noch keine Zuordnung: einmal fragen und in den Einstellungen speichern
     op = await ask(tab.id, 'Projekt: ' + d.site + '\n' + d.cnt + ' Einträge an ' + d.groups.length +
-      ' Tagen.\n\nNoch kein OpenProject-Link (Patchday Protokoll) in T3 Watchdock. Link:', '');
+      ' Tagen.\n\nKeine Zuordnung in den Einstellungen. OpenProject-Link (Patchday Protokoll):', '');
     if (!op || !op.trim()) return;
     op = op.trim();
-    const s = await run(tab.id, saveLinkWD, [d.project, op], 'MAIN');
-    if (!s || s.error) return say(tab.id, 'Link nicht gespeichert: ' + ((s && s.error) || 'Fehler'));
+    if (m) m.op = op; else cfg.map.push({ id: d.project, name: d.site, op });
+    await LS.set({ map: cfg.map });
   }
   // Wer führt aus? Eingabe = diese Person(en); leer = Namen aus den Einstellungen (ausgeglichen verteilt)
   const who = await ask(tab.id, 'Ausführung: Wer führt aus?\nMehrere Namen mit Komma trennen.\nLeer lassen = aus Einstellungen: ' + cfg.names.join(', '), '');

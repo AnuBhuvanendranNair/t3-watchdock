@@ -8,10 +8,15 @@
 <label><input type="checkbox" id="askTime"> Uhrzeit für vergangene Daten abfragen (sonst immer automatisch)</label>
 <label for="wd">T3 Watchdock – Adresse</label>
 <input type="url" id="wd" placeholder="http://127.0.0.1:8787">
-<small>Die OpenProject-Links je Projekt stehen in T3 Watchdock (Einstellungen → Patchday). Beim Speichern fragt Chrome einmal nach dem Zugriff auf diese Adresse (für „Alle ausführen“).</small>
+<small>Beim Speichern fragt Chrome einmal nach dem Zugriff auf diese Adresse (für „Alle ausführen“ und „Projekte laden“).</small>
+<label>Zuordnung T3 Watchdock → OpenProject</label>
+<small>Projekt-ID = ID des Projekts in T3 Watchdock (steht in der Adresse der Projektseite: <code>#/p/&lt;Projekt-ID&gt;</code>). „Projekte laden“ ergänzt alle Projekte aus T3 Watchdock.</small>
+<table><thead><tr><th style="width:24%">Projekt</th><th style="width:26%">Projekt-ID</th><th>OpenProject-Link (Patchday Protokoll)</th><th></th></tr></thead><tbody id="map"></tbody></table>
+<button id="addRow">+ Zeile</button> <button id="loadProjects">Projekte aus T3 Watchdock laden</button>
 <div><button id="save">Speichern</button><span id="msg"></span></div>
 <label>CSV</label>
-<small>Export = aktuelle Eingaben (Namen, Uhrzeit-Option, T3-Watchdock-Adresse). Import ersetzt die Eingaben im Formular; danach „Speichern“ klicken.</small>
+<small>Export = aktuelle Eingaben (Namen, Uhrzeit-Option, T3-Watchdock-Adresse, Zuordnungen) – auch als Sicherung. Import ersetzt die Eingaben im Formular; danach „Speichern“ klicken.</small>
 <div><button id="exportCsv">CSV exportieren</button> <button id="importCsv">CSV importieren</button><input type="file" id="csvFile" accept=".csv,text/csv" hidden></div>
+<script src="shared.js"></script>
 <script src="options.js"></script>
 </body></html>
