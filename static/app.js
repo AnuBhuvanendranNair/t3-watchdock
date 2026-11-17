@@ -107,6 +107,7 @@ async function refresh() {
 /* ---------------- router ---------------- */
 async function render() {
   Object.values(pollT).forEach(clearTimeout);
+  delete $("#view").dataset.pview;
   if (!S) await refresh();
   const [a, b, c, d] = (location.hash.slice(1) || "/").split("/").filter(Boolean);
   const navKey = !a || a === "p" || a === "new" ? "projects" : a;
@@ -182,6 +183,44 @@ async function loadRunStatus() {
   if (Object.values(RUNST).some(r => BUSY.includes(r.status))) loadRunStatus.t = setTimeout(loadRunStatus, 8000);
 }
 
+// Projects page: technology filter (two steps: technology → version), data from the last t3monitor check (T3SUM).
+// Versions are grouped: TYPO3 by major, the rest by product + major.minor. A project matches if production OR staging matches.
+const mm = v => (String(v || "").match(/\d+\.\d+/) || [""])[0];
+const TECH = {
+  typo3: {label: "TYPO3", get: x => { const m = String(x.typo3 || "").match(/^(\d+)\./); return m ? `TYPO3 ${m[1]}` : ""; }},
+  php: {label: "PHP", get: x => mm(x.php) && `PHP ${mm(x.php)}`},
+  db: {label: "Database", get: x => x.db ? `${/mariadb/i.test(x.db) ? "MariaDB" : "MySQL"} ${mm(x.db)}`.trim() : ""},
+  web: {label: "Web server", get: x => { const m = String(x.webserver || "").match(/^([A-Za-z][\w-]*)(?:\/(\d+\.\d+))?/);
+    return m ? `${m[1]}${m[2] ? " " + m[2] : " (version hidden)"}` : ""; }},
+  os: {label: "OS", get: x => { const m = String(x.os || "").match(/^([A-Za-z]+)\s+(\d+\.\d+)?/); return m ? `${m[1]}${m[2] ? " " + m[2] : ""}` : ""; }},
+};
+let techFilter = {tech: "", val: "", open: false};
+const techVals = (pid, tech) => { const x = T3SUM?.[pid] || {};
+  return [...new Set(T3M_ENVS.map(e => x[e.env]).filter(y => y?.has_data).map(TECH[tech].get).filter(Boolean))]; };
+const verDesc = (a, b) => { const n = s => (s.match(/[\d.]+$/) || ["0"])[0].split(".").map(Number), A = n(a), B = n(b);
+  const pa = a.replace(/[\d.]+$/, ""), pb = b.replace(/[\d.]+$/, "");
+  return pa !== pb ? pa.localeCompare(pb) : (B[0] - A[0]) || ((B[1] || 0) - (A[1] || 0)); };
+function paintTechFilter() {
+  const t = $("#tfTech"), v = $("#tfVal"); if (!t || !v) return;
+  if (!techFilter.tech) { v.disabled = true; v.innerHTML = `<option value="">Any version</option>`; return applyTechFilter(); }
+  const count = new Map();
+  S.projects.forEach(p => techVals(p.id, techFilter.tech).forEach(k => count.set(k, (count.get(k) || 0) + 1)));
+  if (techFilter.val && !count.has(techFilter.val)) techFilter.val = "";
+  v.disabled = !count.size;
+  v.innerHTML = `<option value="">${count.size ? `Any ${esc(TECH[techFilter.tech].label)} version` : T3SUM ? "No data" : "Loading…"}</option>`
+    + [...count.keys()].sort(verDesc).map(k => `<option value="${esc(k)}"${k === techFilter.val ? " selected" : ""}>${esc(k)} (${count.get(k)})</option>`).join("");
+  applyTechFilter();
+}
+function applyTechFilter() {
+  const {tech, val} = techFilter, on = !!(tech && val);
+  const show = new Set(on ? S.projects.filter(p => techVals(p.id, tech).includes(val)).map(p => p.id) : []);
+  document.querySelectorAll("#view [data-pid]").forEach(el => { el.hidden = on && !show.has(el.dataset.pid); });
+  if ($("#tfCount")) $("#tfCount").textContent = on ? `${show.size} of ${S.projects.length} projects` : "";
+  const c = $("[data-act=tfclear]"); if (c) c.hidden = !tech;
+}
+
+// Projects page: grid (cards) or list (TYPO3 status table); choice remembered per browser
+const projView = () => { try { return localStorage.getItem("projectsView") === "list" ? "list" : "grid"; } catch (e) { return "grid"; } };
 function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload needed
   const projectsWithRuns = new Set(S.projects_with_runs || []);
   const cards = S.projects.map(p => {
@@ -193,7 +232,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
         ${esc(e.label)}${ready ? "" : " · Key missing"}
       </span>`;
     }).join("");
-    return `<a class="pcard" href="${pUrl(p)}">
+    return `<a class="pcard" data-pid="${esc(p.id)}" href="${pUrl(p)}">
       <div class="name">${esc(p.name)}</div>
       <div class="sub">${esc(p.path || "–")}</div>
       <div class="chips">
@@ -206,7 +245,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
       <div class="srvline" data-srv="${esc(p.id)}"></div>
       <div class="last">${!hasCI(p) ? "Monitoring only" : last ? `<span data-runst="${esc(p.id)}">${runStatusHtml(p.id)}</span> Last run: #${esc(last.pipeline)} · ${esc(fmt(last.t))} · ${esc(last.trigger)}` : "No runs yet"}</div>
     </a>
-    <article class="pcard focus-project">
+    <article class="pcard focus-project" data-pid="${esc(p.id)}">
       <a class="focus-project-link name" href="${pUrl(p)}">
         ${projectsWithRuns.has(p.id) ? `<span class="focus-avatar" data-project="${esc(p.id)}" data-gitlab="${esc(p.gitlab_url)}" aria-hidden="true">${esc(p.name.trim().split(/\s+/u, 2).map(word => Array.from(word)[0] || "").join("").toLocaleUpperCase())}</span>` : ""}
         <span class="focus-project-name">${esc(p.name)}</span><span class="focus-project-arrow" aria-hidden="true">›</span>
@@ -224,10 +263,23 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
   $("#view").innerHTML = `
     <div class="head"><div><h1>Projects</h1><div class="sub" data-secondary-copy>${S.projects.length} project(s) · <span class="srvlegend"><span class="upd">↑</span> TYPO3 update available · <span class="diff">≠</span> staging differs from production</span></div></div>
       <div class="actions">
+        ${S.projects.length ? `<div class="seg" role="group" aria-label="Projects view">${[["grid", "Grid view: project cards"], ["list", "List view: TYPO3 status table"]]
+          .map(([v, t]) => `<button type="button" class="seg-b" data-act="pview" data-v="${v}" title="${t}" aria-label="${t}" aria-pressed="${projView() === v}">${ic(v)}</button>`).join("")}</div>` : ""}
+        ${S.projects.length ? `<button type="button" class="btn sec icon${techFilter.open ? " on" : ""}" data-act="tftoggle" title="Filter by technology" aria-label="Filter by technology" aria-expanded="${!!techFilter.open}" aria-controls="tfBar">${ic("filter")}</button>` : ""}
         ${S.projects.some(hasCI) ? icBtn("play", "Run all: start the main pipeline (not production) of every CI/CD project", `data-act="runall"`, "btn icon") : ""}
         <a class="btn sec icon" href="#/new" title="New project" aria-label="New project">${ic("plus")}</a></div></div>
+    ${S.projects.length ? `<div class="tfilter" id="tfBar" role="search" aria-label="Filter projects by technology"${techFilter.open ? "" : " hidden"}>
+      <span class="selw"><select id="tfTech" aria-label="Technology"><option value="">All technologies</option>
+        ${Object.entries(TECH).map(([k, t]) => `<option value="${k}"${techFilter.tech === k ? " selected" : ""}>${t.label}</option>`).join("")}</select>${ic("chev")}</span>
+      <span class="selw"><select id="tfVal" aria-label="Version" disabled><option value="">Any version</option></select>${ic("chev")}</span>
+      <span class="sub" id="tfCount" aria-live="polite"></span>
+      <button type="button" class="btn sec sm icon" data-act="tfclear" title="Clear filter" aria-label="Clear filter" hidden>${ic("close")}</button></div>` : ""}
     ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">No projects yet. <a href="#/new">Create one</a>.</div>`}
     ${S.projects.length ? `<div class="card full" id="t3sum" style="margin-top:18px"><h2>TYPO3 status – Production &amp; Staging</h2><p class="empty">Loading…</p></div>` : ""}`;
+  $("#view").dataset.pview = projView();
+  $("#tfTech")?.addEventListener("change", ev => { techFilter = {tech: ev.target.value, val: "", open: true}; paintTechFilter(); });
+  $("#tfVal")?.addEventListener("change", ev => { techFilter.val = ev.target.value; applyTechFilter(); });
+  paintTechFilter();
   if (document.documentElement.dataset.style === "focus") loadFocusAvatars();
   paintRunStatus();
   if (S.runs.length) loadRunStatus();          // server caches it (8 s active, 5 min finished)
@@ -294,7 +346,7 @@ async function loadT3mSummary(pre) {
   const rows = projects.map(({p, a, b, checked}, index) => {
     const diff = a?.typo3 && b?.typo3 && a.typo3 !== b.typo3;
     const pdiff = a?.php && b?.php && a.php !== b.php;
-    return `<tr data-rank="${ranks.get(p.id)}" data-original-order="${index}"><td class="focus-row-number">${ranks.get(p.id)}</td><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
+    return `<tr data-pid="${esc(p.id)}" data-rank="${ranks.get(p.id)}" data-original-order="${index}"><td class="focus-row-number">${ranks.get(p.id)}</td><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
       ${[[a, ver(a)], [b, ver(b, a)]].map(([x, version]) => `<td class="${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${version}
         ${x?.has_data ? `<div class="focus-env-health">${ew(x)}</div>` : ""}</td>
         <td class="overview-health ${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${ew(x)}</td>`).join("")}
@@ -315,6 +367,7 @@ async function loadT3mSummary(pre) {
       <th scope="col" class="overview-health">Stg E/W</th>
       <th title="Oldest check of the configured instances">Last check</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   updateOverviewOrder();
+  paintTechFilter();
   box.querySelector(".overview-options").onchange = ({target}) => {
     overviewOptions.sort = target.value;
     loadT3mSummary(d);
@@ -1142,6 +1195,17 @@ function viewScheduler() {
 
 /* ---------------- actions ---------------- */
 const actions = {
+  tfclear() { techFilter = {...techFilter, tech: "", val: ""}; if ($("#tfTech")) $("#tfTech").value = ""; paintTechFilter(); },
+  tftoggle(el) {   // off = hide the bar and clear the filter
+    const open = !techFilter.open; techFilter = open ? {...techFilter, open} : {tech: "", val: "", open};
+    $("#tfBar").hidden = !open; el.classList.toggle("on", open); el.setAttribute("aria-expanded", String(open));
+    if (open) $("#tfTech").focus(); else { $("#tfTech").value = ""; paintTechFilter(); }
+  },
+  pview(el) {
+    const v = el.dataset.v; try { localStorage.setItem("projectsView", v); } catch (e) {}
+    $("#view").dataset.pview = v;
+    document.querySelectorAll("[data-act=pview]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  },
   t3review(el) {   // open the Problems row and bring it into view
     const r = el.closest(".t3m")?.querySelector("details.t3-problems"); if (!r) return;
     r.open = true; r.scrollIntoView({block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});

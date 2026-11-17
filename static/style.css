@@ -479,6 +479,27 @@ button.hchip:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .runs a.run-row.on{box-shadow:inset 3px 0 0 var(--acc)}
 
 
+/* Projects page: grid / list switch */
+.seg{display:inline-flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.seg-b{display:inline-flex;align-items:center;justify-content:center;padding:7px 10px;border:0;background:transparent;color:var(--mut);cursor:pointer}
+.seg-b+.seg-b{border-left:1px solid var(--bd)}
+.seg-b:hover{background:var(--hover);color:var(--fg)}
+.seg-b[aria-pressed="true"]{background:var(--chip);color:var(--fg)}
+.seg-b:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+#view[data-pview="grid"] #t3sum{display:none}
+#view[data-pview="list"]>.grid{display:none}
+#view[data-pview="list"] #t3sum{margin-top:0!important}
+
+/* Projects page: technology filter */
+.tfilter{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:0 0 16px}
+.tfilter[hidden]{display:none}
+.selw{position:relative;display:inline-flex;align-items:center}
+.tfilter select{width:auto;min-width:200px;max-width:100%;appearance:none;-webkit-appearance:none;padding-right:36px;cursor:pointer}
+.selw>.ic{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--mut);pointer-events:none;vertical-align:0}
+.btn.icon.on{background:var(--chip);border-color:var(--acc);color:var(--acc)}
+.tfilter select:disabled{opacity:.55}
+#view [data-pid][hidden]{display:none!important}
+
 /* TYPO3 status modal — calm redesign */
 .t3dlg{width:min(1320px,calc(100vw - 48px));max-height:calc(100vh - 48px);padding:36px 40px 40px;border-radius:20px}
 .t3h{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:28px}
