@@ -34,6 +34,15 @@ Key = **production domain** of the website: host of the production t3monitor URL
 3. Extension options (right-click icon → **Options**): names, time option, T3 Watchdock address (default `http://127.0.0.1:8787`), then **Projekte aus T3 Watchdock laden** (adds one row per domain) and enter the OpenProject link per website. Rows without a link are not saved. **Speichern** asks Chrome once for access to the T3 Watchdock address.
 4. **CSV exportieren** = backup of all settings incl. links (also to share them with colleagues).
 
+## Firefox
+
+The same folder works in Firefox 128+ (`manifest.json` lists the background script for both browsers, add-on ID `patchday@gingco.de`).
+
+- Test: `about:debugging` → *This Firefox* → **Load Temporary Add-on** → select `chrome-extension/manifest.json` (removed when Firefox restarts).
+- Permanent: Firefox only installs signed add-ons. Sign it as *unlisted* (self-distributed) on addons.mozilla.org, then install the signed `.xpi`.
+- Firefox may not grant site access at install: *about:addons* → Patchday → **Permissions** → allow `op.hub.gingco.de` and the T3 Watchdock address.
+- Settings are stored per browser: use **CSV exportieren / importieren** to move them from Chrome.
+
 ## Workflow
 
 - **One project:** open the project page in T3 Watchdock (`#/p/<id>`) and click **Patchday** (button) or the extension icon. T3 Watchdock reads the site again (t3monitor, production), then OpenProject opens next to it and the rows are inserted as before. No link yet → the extension asks once and saves it in its settings.

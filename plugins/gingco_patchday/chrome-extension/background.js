@@ -1,5 +1,6 @@
 // Patchday 2.0 – Ein Klick auf der Projektseite in T3 Watchdock: Daten lesen -> OpenProject öffnen -> automatisch eintragen.
-importScripts('shared.js'); // OP, getCfg, opEditUrl, readWD, writeOP, syncBridge
+// Chrome: Service Worker lädt shared.js hier; Firefox: Hintergrundskript, shared.js kommt über manifest.json (background.scripts)
+if (typeof importScripts === 'function') importScripts('shared.js'); // OP, getCfg, opEditUrl, readWD, writeOP, syncBridge
 const LS = chrome.storage.local, SS = chrome.storage.session;
 const run = (tabId, func, args = [], world = 'ISOLATED') =>
   chrome.scripting.executeScript({ target: { tabId }, func, args, world }).then(r => r[0] && r[0].result).catch(e => { run.err = e.message; console.warn('Patchday:', e.message); return null; });
