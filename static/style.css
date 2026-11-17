@@ -455,6 +455,30 @@ button.hchip:hover{filter:brightness(1.15)}
 button.hchip:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .hchip .ic{width:16px;height:16px}
 
+/* Configuration card as dev info: each section a monospace block, heading styled as a comment */
+.project-config section,.project-config section+section{margin-top:10px;padding:10px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.project-config h3{font:inherit;font-weight:600;color:var(--mut);justify-content:flex-start;gap:0 8px}
+.project-config h3>:last-child{margin-left:auto}
+.project-config h3::before{content:"#";opacity:.7}
+.project-config h3 code{background:none;padding:0;color:var(--acc);font:inherit}
+.project-config .config-status{font-size:inherit}
+.project-config dl{grid-template-columns:minmax(0,9em) minmax(0,1fr);gap:0 10px;margin-top:4px}
+.project-config dt{color:var(--mut)}
+.project-config dt::after{content:":"}
+.project-config dd,.project-config dd code{font:inherit;color:var(--fg);background:none;padding:0}
+
+/* Recent runs: env tag · #id · trigger · relative time */
+.runs a.run-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:8px 10px;border-radius:6px;font-size:15px}
+.env-tag{font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;padding:4px 6px;border-radius:4px;min-width:3.6em;text-align:center}
+.env-tag.stg{color:var(--run);background:color-mix(in srgb,var(--run) 14%,transparent)}
+.env-tag.prod{color:var(--err);background:color-mix(in srgb,var(--err) 14%,transparent)}
+.run-id{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--mut)}
+.run-trig{display:inline-flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.run-trig .ic{color:var(--mut)}
+.run-row time{font-size:13px;white-space:nowrap}
+.runs a.run-row.on{box-shadow:inset 3px 0 0 var(--acc)}
+
+
 /* TYPO3 status modal — calm redesign */
 .t3dlg{width:min(1320px,calc(100vw - 48px));max-height:calc(100vh - 48px);padding:36px 40px 40px;border-radius:20px}
 .t3h{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:28px}

@@ -359,6 +359,27 @@ function runsTxt(sch) {
   const range = ds.length > 2 && ix.every((v, i) => v >= 0 && (i === 0 || v === ix[i - 1] + 1));
   return `Runs ${range ? `${ds[0]}–${ds[ds.length - 1]}` : ds.join(", ")} at ${m[1]}`;
 }
+// "Recent runs" row: environment tag, pipeline number, trigger (icon + short text), relative time (exact time in tooltip)
+const ago = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000));
+  if (Number.isNaN(m)) return fmt(t);
+  if (m < 1) return "just now"; if (m < 60) return `${m} min ago`; if (m < 1440) return `${Math.floor(m / 60)} h ago`;
+  const d = Math.floor(m / 1440); return d === 1 ? "yesterday" : d < 7 ? `${d} days ago` : fmt(t).slice(0, 10); };
+function runTrigger(t = "") {
+  let m;
+  if ((m = t.match(/^promote #(\d+) -> /))) return ["play", `from #${m[1]}`, `Promoted from staging pipeline #${m[1]}`];
+  if ((m = t.match(/^TYPO3 (\S+) -> (\S+)$/))) return ["update", `TYPO3 ${m[1]} → ${m[2]}`, `Automatic TYPO3 update ${m[1]} → ${m[2]}`];
+  if (t === "manual TYPO3 update") return ["update", "TYPO3 update", "TYPO3 update, started by hand"];
+  if (/^manual( -> |$)/.test(t)) return ["play", "manual", "Started by hand"];
+  return ["play", t, t];
+}
+function runRow(p, r, prod, on) {
+  const [icon, txt, tip] = runTrigger(r.trigger);
+  return `<a href="${pUrl(p)}/pl/${Number(r.pipeline)}" class="run-row${on ? " on" : ""}" title="${esc(tip)} · ${esc(fmt(r.t))}">
+    <span class="env-tag ${prod ? "prod" : "stg"}">${prod ? "PROD" : "STG"}</span>
+    <code class="run-id">#${esc(r.pipeline)}</code>
+    <span class="run-trig">${ic(icon, "sm")}${esc(txt)}</span>
+    <time class="sub" datetime="${esc(r.t)}">${esc(ago(r.t))}</time></a>`;
+}
 
 function viewProject(p, pipelineId) {
   if (!hasCI(p)) return viewProjectNoCI(p);
@@ -393,8 +414,7 @@ function viewProject(p, pipelineId) {
           <div class="pipe-title" id="pipeTitle-${e.slot}">${e.pid ? "Pipeline #" + esc(e.pid) : ""}</div>
           <div id="pipe-${e.slot}">${e.pid ? `<p class="empty">Loading…</p>` : `<p class="empty">No ${e.label.toLowerCase()} pipeline started from the launcher yet.</p>`}</div></div>`).join("")}
         <div class="card"><h2>Recent runs</h2><div class="runs">
-          ${runs.map(r => `<a href="${pUrl(p)}/pl/${Number(r.pipeline)}" class="${r.pipeline === pid ? "on" : ""}">
-            <span>#${esc(r.pipeline)} · ${esc(r.trigger)}</span><span class="sub">${esc(fmt(r.t))}</span></a>`).join("")
+          ${runs.map(r => runRow(p, r, !!isProd(r), r.pipeline === pid)).join("")
             || `<p class="empty">No runs yet.</p>`}
         </div></div>
       </div>
