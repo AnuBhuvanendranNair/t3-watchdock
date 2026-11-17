@@ -12,7 +12,7 @@ Two parts:
 | Part | Purpose |
 |---|---|
 | `plugin.py`, `static/patchday.js` | T3 Watchdock plugin (read-only): update history (production), project list, optional *Patchday* button on the project page |
-| `chrome-extension/` | Chrome extension: settings incl. OpenProject link per website (domain); reads the data from the open T3 Watchdock tab and fills the OpenProject page (editor, duplicate check, time, executor, confirmation before saving — unchanged from 1.4) |
+| `chrome-extension/` | Browser extension (Chrome, Firefox 128+): settings incl. OpenProject link per website (domain); reads the data from the open T3 Watchdock tab and fills the OpenProject page (editor, duplicate check, time, executor, confirmation before saving — unchanged from 1.4) |
 
 Everything that only the extension needs (names, time option, OpenProject links) is stored in the extension. T3 Watchdock only provides the data.
 
@@ -31,7 +31,7 @@ Key = **production domain** of the website: host of the production t3monitor URL
    `"button": true` shows a **Patchday** button on the project page; without it, start with the extension icon only.
 2. Chrome: `chrome://extensions` → **Developer mode** → **Load unpacked** → select `plugins/gingco_patchday/chrome-extension`.
    Before removing an old Patchday 1.x: export its settings as CSV. Chrome deletes an extension's settings when it is removed.
-3. Extension options (right-click icon → **Options**): names, time option, T3 Watchdock address (default `http://127.0.0.1:8787`), then **Projekte aus T3 Watchdock laden** (adds one row per domain) and enter the OpenProject link per website. Rows without a link are not saved. **Speichern** asks Chrome once for access to the T3 Watchdock address.
+3. Extension options (right-click icon → **Options**): names, time option, T3 Watchdock address (default `http://127.0.0.1:8787`), then **Projekte aus T3 Watchdock laden** (adds one row per domain) and enter the OpenProject link per website. Rows without a link are not saved. Access to `127.0.0.1`, `localhost` and `local-gitlabrunner.local` is built in; for any other T3 Watchdock address **Speichern** asks once for access.
 4. **CSV exportieren** = backup of all settings incl. links (also to share them with colleagues).
 
 ## Firefox
@@ -47,8 +47,21 @@ The same folder works in Firefox 128+ (`manifest.json` lists the background scri
 
 - **One project:** open the project page in T3 Watchdock (`#/p/<id>`) and click **Patchday** (button) or the extension icon. T3 Watchdock reads the site again (t3monitor, production), then OpenProject opens next to it and the rows are inserted as before. No link yet → the extension asks once and saves it in its settings.
 - **All projects:** right-click the extension icon → **Alle ausführen**. Runs every mapping in the settings.
+- **Nothing new** (history empty or everything already in the protocol): asks, then adds a row for today with "Keine Updates gefunden" — as in 1.x. No prompt if today already has a row.
+- **Login:** only OpenProject (log in first; on the login page the rows are inserted after login, within 10 minutes). No T3Monitor login needed.
 
-**Button → extension:** after **Speichern** in the options (access granted), the extension adds a small script (`wd-bridge.js`) to the T3 Watchdock address. It marks the page (`data-patchday="1"`) and passes the button click to the extension. Pages opened before need a reload. Without the extension the button only shows a message.
+**Button → extension:** the extension loads a small script (`wd-bridge.js`) on T3 Watchdock pages. It marks the page (`data-patchday="1"`), passes the button click to the extension and shows its result: errors and cancels appear as a message top right. After reloading the extension, reload the T3 Watchdock page too.
+
+## Troubleshooting
+
+| Message | Solution |
+|---|---|
+| "Patchday extension not found" | Extension not installed, or the T3 Watchdock page was opened before it: reload the page (F5) |
+| "… Erweiterung neu geladen? Bitte diese Seite neu laden" | Extension was reloaded: reload the T3 Watchdock page |
+| "Die Erweiterung kann diese Seite nicht lesen" | No site access: `chrome://extensions` → Patchday → *Details* → *Site access* (Firefox: *about:addons* → *Permissions*) |
+| "No project with production domain … in T3 Watchdock" | Domain in the mapping does not match the production t3monitor URL of any project |
+| "No t3monitor data for … (production)" | Set the production t3monitor URL and key of the project in T3 Watchdock |
+| "Plugin "gingco_patchday" ist in T3 Watchdock nicht aktiviert" | Add the plugin to `config.json` (see Setup) |
 
 ## Data
 
@@ -72,5 +85,5 @@ The extension calls these from inside the T3 Watchdock tab (same origin), so T3 
 
 | Version | Changes |
 |---|---|
-| 2.0 | Data from T3 Watchdock instead of T3Monitor; mapping by production domain; optional *Patchday* button in T3 Watchdock; 1.x CSV mapping rows are taken over when their website is a domain |
+| 2.0 | Data from T3 Watchdock instead of T3Monitor; mapping by production domain; optional *Patchday* button in T3 Watchdock; Firefox 128+; 1.x CSV mapping rows are taken over when their website is a domain |
 | 1.4 | Last stand-alone version (repository `patchday`) |
