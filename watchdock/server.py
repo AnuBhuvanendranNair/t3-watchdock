@@ -14,6 +14,7 @@ from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_
 from .watcher import resume_mail_watches
 from .projects import add_project, export_projects, import_projects, update_project
 from .updates import send_now
+from .plugins import NotFound, asset as plugin_asset, assets as plugin_assets, call as plugin_call
 from .scheduler import TASKS, save_sched, sched_run, sched_view, scheduler
 
 
@@ -116,6 +117,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, search_projects(q["gitlab_url"][0], q["q"][0]))
             if u.path == "/api/runs/status":
                 return self._send(200, last_run_status())
+            if u.path == "/api/plugins":
+                return self._send(200, plugin_assets())
+            if u.path.startswith("/plugins/"):              # /plugins/<name>/<file>: browser files of a plugin
+                parts = u.path.split("/")
+                if len(parts) != 4:
+                    raise NotFound("not found")
+                return self._send(200, *plugin_asset(parts[2], parts[3]))
+            if u.path.startswith("/api/plugins/"):          # /api/plugins/<name>/<route>
+                parts = u.path.split("/")
+                if len(parts) != 5:
+                    raise NotFound("not found")
+                return self._send(200, plugin_call("GET", parts[3], parts[4], q))
             if u.path == "/api/pipeline":
                 p = find_project(q["project"][0])
                 pid = int(q["id"][0])
@@ -123,6 +136,8 @@ class Handler(BaseHTTPRequestHandler):
                     "pipeline": gitlab(p, "GET", f"/pipelines/{pid}"),
                     "jobs": gitlab(p, "GET", f"/pipelines/{pid}/jobs?per_page=100")})
             return self._send(404, {"error": "not found"})
+        except NotFound as e:
+            return self._send(404, {"error": str(e)})
         except Exception as e:
             return self._send(500, {"error": str(e)})
 
@@ -212,6 +227,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, export_projects())
             if path == "/api/projects/import":
                 return self._send(200, import_projects(body.get("data"), bool(body.get("overwrite"))))
+            if path.startswith("/api/plugins/"):
+                parts = path.split("?")[0].split("/")
+                if len(parts) != 5:
+                    raise NotFound("not found")
+                return self._send(200, plugin_call("POST", parts[3], parts[4], body))
             if path == "/api/projects/delete":
                 with lock:
                     cfg = config()
@@ -228,6 +248,8 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"Project removed: {body['id']}")
                 return self._send(200, {"ok": True})
             return self._send(404, {"error": "not found"})
+        except NotFound as e:
+            return self._send(404, {"error": str(e)})
         except Exception as e:
             return self._send(500, {"error": str(e)})
 

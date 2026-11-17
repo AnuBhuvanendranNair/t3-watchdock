@@ -107,6 +107,7 @@ python3 app.py --no-watch    # TYPO3 release check paused (Scheduler)
 | `email.host` / `email.port` / `email.security` | SMTP server; security `starttls`, `ssl` or `none` |
 | `email.user` | SMTP login (empty = no login); password is stored in `.smtp-password` |
 | `email.from` / `email.to` | Sender and list of recipients |
+| `plugins.<name>` | Switch on a plugin from `plugins/<name>/` and hold its settings (`false` or `{"enabled": false}` = off); see *Plugins* |
 
 Changing a project's TYPO3 major resets its baseline (no immediate trigger).
 
@@ -222,6 +223,25 @@ Notes:
 - macOS notifications (TYPO3 auto-trigger) do not work inside the container; use Teams notifications or the Activity log instead.
 - Environment: `LAUNCHER_DATA` (data folder, default: app folder), `LAUNCHER_HOST` (bind address, default `127.0.0.1`), `LAUNCHER_ALLOWED_HOSTS` (extra accepted hostnames, comma-separated), `LAUNCHER_TLS_CERT` / `LAUNCHER_TLS_KEY` / `LAUNCHER_TLS_PORT` (HTTPS listener, default port `8443`).
 
+## Plugins
+
+Optional, team-specific features live in `plugins/<name>/` and stay off until switched on in `config.json`:
+
+```json
+"plugins": {"gingco_patchday": {}}
+```
+
+A plugin is a folder with
+
+- `plugin.py` — `GET = {"route": fn(query)}` and `POST = {"route": fn(body)}`, served at `/api/plugins/<name>/<route>` (same Host / Origin checks as the rest of the API)
+- `static/*.js`, `static/*.css` — loaded by the web UI; a script calls `watchdock.register({projectPage(project, view), settingsPage(stack)})` to add to the project and settings pages
+
+Switched off (or missing) plugins answer `404` and load nothing. `config.json` is read on every request: after switching a plugin on or off, reload the browser page. Docker copies `plugins/` into the image, so rebuild once after updating the code (`docker compose up -d --build`); Chrome extensions (`plugins/*/chrome-extension`) are not copied.
+
+| Plugin | Purpose |
+|---|---|
+| [`gingco_patchday`](plugins/gingco_patchday/README.md) | Gingco Communication only: provides the production update history to the Patchday Chrome extension, which writes it into the Patchday protocol in OpenProject |
+
 ## Security
 
 - Binds to `127.0.0.1` only (Docker: published on `127.0.0.1` only)
@@ -246,7 +266,9 @@ Notes:
 | `watchdock/projects.py` | Create / update project entries, export / import |
 | `watchdock/scheduler.py` | Background scheduler |
 | `watchdock/server.py` | HTTP server and API routes |
+| `watchdock/plugins.py` | Plugin loader (routes and browser files of enabled plugins) |
 | `static/` | Web UI (`index.html`, `style.css`, `app.js`) |
+| `plugins/` | Optional plugins, off by default (see *Plugins*) |
 | `config.example.json` | Example configuration |
 | `Dockerfile`, `compose.yaml` | Docker setup |
 | `certs/` | mkcert certificate + key (gitignored) |

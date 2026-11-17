@@ -12,6 +12,7 @@ WORKDIR /app
 COPY app.py ./
 COPY watchdock/ watchdock/
 COPY static/ static/
+COPY plugins/ plugins/
 
 EXPOSE 8787
 CMD ["python", "app.py"]

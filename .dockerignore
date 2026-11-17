@@ -2,4 +2,6 @@
 !app.py
 !watchdock/
 !static/
+!plugins/
+plugins/*/chrome-extension
 **/__pycache__
