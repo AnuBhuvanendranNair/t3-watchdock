@@ -10,6 +10,6 @@
     try {
       chrome.runtime.sendMessage({ type: 'run', project: String(e.data.project || '') }, r =>
         back(r || { error: 'Patchday: keine Antwort der Erweiterung (' + ((chrome.runtime.lastError || {}).message || '?') + '). Erweiterung neu laden und Seite neu laden.' }));
-    } catch (x) { back({ error: 'Patchday: Erweiterung wurde neu geladen – bitte diese Seite neu laden.' }); }
+    } catch (x) { back({ error: 'Patchday: ' + x.message + ' – Erweiterung neu geladen? Bitte diese Seite neu laden (F5).' }); }
   });
 })();
