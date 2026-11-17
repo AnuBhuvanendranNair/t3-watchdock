@@ -10,7 +10,10 @@
     "contextMenus"
   ],
   "host_permissions": [
-    "https://op.hub.gingco.de/*"
+    "https://op.hub.gingco.de/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://local-gitlabrunner.local/*"
   ],
   "optional_host_permissions": [
     "http://*/*",
