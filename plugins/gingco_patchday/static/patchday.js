@@ -16,10 +16,16 @@
     b.onclick = () => {
       if (document.documentElement.dataset.patchday !== "1")
         return toast("Patchday extension not found. Install it, save its options once (access to this address) and reload this page.", true);
+      toast("Patchday: reading the site, then OpenProject opens…");
       window.postMessage({type: "patchday:run", project: p.id}, location.origin);
     };
     actions.prepend(b);
   }
+
+  // result from the extension (via its bridge): show errors
+  window.addEventListener("message", e => {
+    if (e.source === window && e.origin === location.origin && e.data?.type === "patchday:status" && e.data.error) toast(e.data.error, true);
+  });
 
   window.watchdock.register({projectPage});
 })();

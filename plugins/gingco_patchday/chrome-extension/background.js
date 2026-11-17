@@ -2,7 +2,7 @@
 importScripts('shared.js'); // OP, getCfg, opEditUrl, readWD, writeOP, syncBridge
 const LS = chrome.storage.local, SS = chrome.storage.session;
 const run = (tabId, func, args = [], world = 'ISOLATED') =>
-  chrome.scripting.executeScript({ target: { tabId }, func, args, world }).then(r => r[0] && r[0].result).catch(e => { console.warn('Patchday:', e.message); return null; });
+  chrome.scripting.executeScript({ target: { tabId }, func, args, world }).then(r => r[0] && r[0].result).catch(e => { run.err = e.message; console.warn('Patchday:', e.message); return null; });
 const ask = (tabId, msg, def = '') => run(tabId, (m, d) => prompt(m, d), [msg, def]);
 const say = (tabId, msg) => run(tabId, m => alert(m), [msg]);
 const hostOf = u => { try { return new URL(u).host; } catch (e) { return ''; } };
@@ -16,7 +16,12 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.contextMenus.onClicked.addListener(i => { if (i.menuItemId === 'all') chrome.tabs.create({ url: 'batch.html' }); });
 
 // Button "Patchday" auf der Projektseite in T3 Watchdock (über wd-bridge.js) = Klick auf das Symbol
-chrome.runtime.onMessage.addListener((msg, sender) => { if (msg && msg.type === 'run' && sender.tab) start(sender.tab, msg.project); });
+// Antwort an die Seite: Fehler erscheinen dort als Meldung
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (!(msg && msg.type === 'run' && sender.tab)) return;
+  start(sender.tab, msg.project).then(() => reply({ ok: true }), e => reply({ error: 'Patchday: ' + e.message }));
+  return true;
+});
 chrome.action.onClicked.addListener(tab => start(tab));
 
 async function start(tab, project) {
@@ -29,7 +34,8 @@ async function start(tab, project) {
   }
   if (!/^https?:/.test(tab.url || '')) return; // z. B. chrome://-Seiten: dort darf nichts eingeblendet werden
 
-  const d = await run(tab.id, readWD, [project || ''], 'MAIN');      // Projektseite in T3 Watchdock (#/p/<id>)
+  const d = await run(tab.id, readWD, [project || ''], 'MAIN');
+  if (d === null) throw new Error('Die Erweiterung kann diese Seite nicht lesen (' + (run.err || 'kein Zugriff') + '). Website-Zugriff der Erweiterung in chrome://extensions prüfen.');      // Projektseite in T3 Watchdock (#/p/<id>)
   if (!d || d.error) return say(tab.id, (d && d.error) || 'Fehler beim Lesen aus T3 Watchdock.');
   const cfg = await getCfg();
   if (!d.domain) return say(tab.id, 'Projekt ' + d.site + ': keine Produktiv-URL (t3monitor) in T3 Watchdock – Zuordnung nicht möglich.');
