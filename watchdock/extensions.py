@@ -269,3 +269,43 @@ def ext_changelog(composer, version, installed=""):
         res["base"] = res["url"].rsplit("/", 1)[0] + "/"   # for relative links in the text
     _cl_cache[key] = res
     return res
+
+
+def _first_line(text, version):
+    """First meaningful changelog line: skips headings naming the version, dates, separators; strips markdown."""
+    v = re.escape(version.lstrip("v"))
+    for ln in (text or "").splitlines():
+        s = ln.strip()
+        if not s or re.fullmatch(r"[-=*_#\s]+", s):
+            continue
+        if re.match(r"#{1,6}\s", s) and (re.search(r"(?<![\d.])v?" + v + r"(?![\d.])", s) or re.search(r"\d{4}-\d{2}-\d{2}", s)):
+            continue
+        if re.match(r"(?:(?:version|release)\s+)?v?" + v + r"(?![\d.])", s, re.I):
+            continue
+        s = re.sub(r"^#{1,6}\s+|^[-*+]\s+|^\d+\.\s+", "", s)
+        s = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", s)           # links/images -> text
+        s = re.sub(r"\s+", " ", re.sub(r"[*_`]{1,3}", "", s)).strip()
+        if re.fullmatch(r"(what'?s changed|changes|changelog|release notes|highlights|summary|overview|notes|details|full changelog\b.*):?", s, re.I):
+            continue                                 # generic headings (e.g. GitHub auto-generated notes)
+        if s:
+            return s[:200]
+    return ""
+
+
+def ext_release(composer, version, summary=True):
+    """Release date (Packagist) and first changelog line of one installed version, for the update history."""
+    composer = composer.lower()
+    if not re.fullmatch(r"[a-z0-9_.\-]+/[a-z0-9_.\-]+", composer):
+        raise RuntimeError("Invalid package name")
+    versions = _pkg_versions(composer) or []
+    want = _vparse(version)
+    pkg = next((p for p in versions if p.get("version") == version), None) or next(
+        (p for p in versions if want and _vparse(p.get("version", "")) and re.fullmatch(r"v?[\d.]+", p["version"])
+         and _vparse(p["version"])[0] == want[0]), None)
+    res = {"time": (pkg or {}).get("time", "")[:10] or None, "summary": ""}
+    if summary and pkg and re.fullmatch(r"v?[\d.]+", pkg["version"]):
+        try:
+            res["summary"] = _first_line(ext_changelog(composer, version).get("text"), pkg["version"])
+        except Exception:
+            pass                                     # no changelog source / rate limit: date only
+    return res
