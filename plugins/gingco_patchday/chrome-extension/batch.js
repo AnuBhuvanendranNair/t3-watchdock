@@ -26,7 +26,7 @@ const saved = async (tabId, edit) => {
   let wdUrl; try { wdUrl = new URL(cfg.wd); } catch (e) { return fail('T3-Watchdock-URL in den Einstellungen ungültig.'); }
   if (!(await chrome.permissions.contains({ origins: [wdOrigin(cfg.wd)] })))
     return fail('Kein Zugriff auf ' + cfg.wd + ' – bitte in den Einstellungen „Speichern“ klicken und den Zugriff erlauben.');
-  const map = cfg.map.filter(m => m.id && m.op);
+  const map = cfg.map.map(m => ({ ...m, domain: normDomain(m.domain) })).filter(m => m.domain && m.op);
   const n = map.length;
   if (!n) return fail('Keine Zuordnungen in den Einstellungen.');
   const me = await chrome.tabs.getCurrent();
@@ -35,7 +35,7 @@ const saved = async (tabId, edit) => {
   const rows = map.map((m, i) => {
     const tr = $('list').insertRow();
     tr.insertCell().textContent = i + 1;
-    tr.insertCell().textContent = m.name || m.id;
+    tr.insertCell().textContent = m.domain + (m.name ? ' (' + m.name + ')' : '');
     const st = tr.insertCell(); st.textContent = 'wartet';
     return st;
   });
@@ -50,13 +50,13 @@ const saved = async (tabId, edit) => {
   let i = 0;
   for (; i < n && !stop; i++) {
     const m = map[i], step = '[' + (i + 1) + '/' + n + '] ';
-    $('txt').textContent = step + (m.name || m.id);
+    $('txt').textContent = step + m.domain;
     $('bar').max = n; $('bar').value = i;
     chrome.action.setBadgeText({ text: (i + 1) + '/' + n });
     set(i, 'läuft…', 'run');
     const res = await (async () => {
       if (hostOf(await open(work.id, wdHome)) !== wdUrl.host) return ['Fehler: T3 Watchdock nicht erreichbar', 'err'];
-      const d = await exec(work.id, readWD, [m.id], 'MAIN');   // liest die Website vorher neu (t3monitor)
+      const d = await exec(work.id, readWD, ['', m.domain], 'MAIN');   // liest die Website vorher neu (t3monitor)
       if (!d || d.error) return ['Fehler: ' + ((d && d.error) || 'T3 Watchdock nicht lesbar'), 'err'];
       const edit = opEditUrl(m.op);
       if (base(await open(work.id, edit)) !== edit) return ['Fehler: OpenProject nicht angemeldet oder Seite nicht gefunden', 'err', 1];

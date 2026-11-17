@@ -12,9 +12,18 @@ Two parts:
 | Part | Purpose |
 |---|---|
 | `plugin.py`, `static/patchday.js` | T3 Watchdock plugin (read-only): update history (production), project list, optional *Patchday* button on the project page |
-| `chrome-extension/` | Chrome extension: settings incl. OpenProject link per project; reads the data from the open T3 Watchdock tab and fills the OpenProject page (editor, duplicate check, time, executor, confirmation before saving — unchanged from 1.4) |
+| `chrome-extension/` | Chrome extension: settings incl. OpenProject link per website (domain); reads the data from the open T3 Watchdock tab and fills the OpenProject page (editor, duplicate check, time, executor, confirmation before saving — unchanged from 1.4) |
 
 Everything that only the extension needs (names, time option, OpenProject links) is stored in the extension. T3 Watchdock only provides the data.
+
+## Mapping
+
+Key = **production domain** of the website: host of the production t3monitor URL in T3 Watchdock, lowercase, without `www.` (e.g. `https://www.die-region.de/` → `die-region.de`). Subdomains stay separate (`eintracht.com` ≠ `verein.eintracht.com`).
+
+- Same in every T3 Watchdock installation → the CSV can be shared with colleagues.
+- Stable when a project is renamed, re-created or moved to another GitLab group.
+- Only a change of the production domain needs the row to be updated.
+- Projects without a production t3monitor URL cannot be mapped (and have no data for Patchday).
 
 ## Setup
 
@@ -22,7 +31,7 @@ Everything that only the extension needs (names, time option, OpenProject links)
    `"button": true` shows a **Patchday** button on the project page; without it, start with the extension icon only.
 2. Chrome: `chrome://extensions` → **Developer mode** → **Load unpacked** → select `plugins/gingco_patchday/chrome-extension`.
    Before removing an old Patchday 1.x: export its settings as CSV. Chrome deletes an extension's settings when it is removed.
-3. Extension options (right-click icon → **Options**): names, time option, T3 Watchdock address (default `http://127.0.0.1:8787`), then **Projekte aus T3 Watchdock laden** and enter the OpenProject link per project. **Speichern** asks Chrome once for access to the T3 Watchdock address.
+3. Extension options (right-click icon → **Options**): names, time option, T3 Watchdock address (default `http://127.0.0.1:8787`), then **Projekte aus T3 Watchdock laden** (adds one row per domain) and enter the OpenProject link per website. Rows without a link are not saved. **Speichern** asks Chrome once for access to the T3 Watchdock address.
 4. **CSV exportieren** = backup of all settings incl. links (also to share them with colleagues).
 
 ## Workflow
@@ -44,8 +53,8 @@ Everything that only the extension needs (names, time option, OpenProject links)
 
 | Route | Purpose |
 |---|---|
-| `GET /api/plugins/gingco_patchday/data?project=<id>&refresh=1` | Update history grouped by day (format of the extension); `refresh=1` reads the site first |
-| `GET /api/plugins/gingco_patchday/projects` | All projects (id, name), for *Projekte laden* |
+| `GET /api/plugins/gingco_patchday/data?domain=<domain>&refresh=1` | Update history grouped by day (format of the extension); also `project=<id>`; `refresh=1` reads the site first |
+| `GET /api/plugins/gingco_patchday/projects` | All projects (id, name, domain), for *Projekte laden* |
 | `GET /api/plugins/gingco_patchday/settings` | `{"button": true/false}` for the web UI |
 
 The extension calls these from inside the T3 Watchdock tab (same origin), so T3 Watchdock's Host / Origin checks stay unchanged.
@@ -54,5 +63,5 @@ The extension calls these from inside the T3 Watchdock tab (same origin), so T3 
 
 | Version | Changes |
 |---|---|
-| 2.0 | Data from T3 Watchdock instead of T3Monitor; mapping by T3 Watchdock project ID (1.x CSV mapping rows with a T3Monitor UID are ignored on import) |
+| 2.0 | Data from T3 Watchdock instead of T3Monitor; mapping by production domain; optional *Patchday* button in T3 Watchdock; 1.x CSV mapping rows are taken over when their website is a domain |
 | 1.4 | Last stand-alone version (repository `patchday`) |

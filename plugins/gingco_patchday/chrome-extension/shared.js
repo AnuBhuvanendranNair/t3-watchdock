@@ -5,9 +5,16 @@ const DEF_NAMES = ['Siva', 'Anu BN'], DEF_WD = 'http://127.0.0.1:8787';
 const getCfg = async () => {
   const c = Object.assign({ askTime: true, wd: DEF_WD, map: [] }, await chrome.storage.local.get(['names', 'askTime', 'wd', 'map']));
   if (!Array.isArray(c.names) || !c.names.length) c.names = DEF_NAMES;
-  if (!Array.isArray(c.map)) c.map = [];               // [{id: Projekt-ID in T3 Watchdock, name, op: OpenProject-Link}]
+  if (!Array.isArray(c.map)) c.map = [];               // [{domain: Produktiv-Domain der Website, name, op: OpenProject-Link}]
   c.wd = String(c.wd || DEF_WD).trim().replace(/\/+$/, '');
   return c;
+};
+// Schlüssel der Zuordnung: Produktiv-Domain, klein, ohne "www." (z. B. "https://www.die-region.de/" -> "die-region.de")
+const normDomain = s => {
+  s = String(s || '').trim().toLowerCase();
+  if (/^https?:\/\//.test(s)) { try { s = new URL(s).hostname; } catch (e) { return ''; } }
+  s = s.replace(/[/?#].*$/, '').replace(/:\d+$/, '').replace(/^www\./, '');
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(s) ? s : '';
 };
 const opEditUrl = op => op.trim().replace(/[?#].*$/, '').replace(/\/+$/, '').replace(/\/edit$/, '') + '/edit';
 
@@ -30,12 +37,12 @@ async function syncBridge(wd) {
 }
 
 // ---------- läuft im T3-Watchdock-Tab (MAIN world: gleiche Herkunft wie die App) ----------
-// Update-Historie eines Projekts; ohne id = Projekt der geöffneten Projektseite (#/p/<id>)
-async function readWD(id) {
+// Update-Historie eines Projekts: per Domain ("Alle ausführen"), per Projekt-ID (Button) oder Projekt der geöffneten Projektseite (#/p/<id>)
+async function readWD(id, domain) {
   id = id || decodeURIComponent((location.hash.match(/^#\/p\/([^/]+)/) || [])[1] || '');
-  if (!id) return { error: 'Bitte auf der Projektseite in T3 Watchdock starten.' };
+  if (!id && !domain) return { error: 'Bitte auf der Projektseite in T3 Watchdock starten.' };
   try {
-    const r = await fetch('/api/plugins/gingco_patchday/data?refresh=1&project=' + encodeURIComponent(id));
+    const r = await fetch('/api/plugins/gingco_patchday/data?refresh=1&' + (domain ? 'domain=' + encodeURIComponent(domain) : 'project=' + encodeURIComponent(id)));
     const d = await r.json().catch(() => ({ error: 'Keine T3-Watchdock-Seite (HTTP ' + r.status + ').' }));
     if (r.status === 404) return { error: 'Plugin "gingco_patchday" ist in T3 Watchdock nicht aktiviert (config.json).' };
     return r.ok ? d : { error: d.error || 'HTTP ' + r.status };

@@ -32,14 +32,15 @@ async function start(tab, project) {
   const d = await run(tab.id, readWD, [project || ''], 'MAIN');      // Projektseite in T3 Watchdock (#/p/<id>)
   if (!d || d.error) return say(tab.id, (d && d.error) || 'Fehler beim Lesen aus T3 Watchdock.');
   const cfg = await getCfg();
-  const m = cfg.map.find(x => x.id === d.project);
+  if (!d.domain) return say(tab.id, 'Projekt ' + d.site + ': keine Produktiv-URL (t3monitor) in T3 Watchdock – Zuordnung nicht möglich.');
+  const m = cfg.map.find(x => normDomain(x.domain) === d.domain);
   let op = m && m.op;
   if (!op) {   // noch keine Zuordnung: einmal fragen und in den Einstellungen speichern
-    op = await ask(tab.id, 'Projekt: ' + d.site + '\n' + d.cnt + ' Einträge an ' + d.groups.length +
+    op = await ask(tab.id, 'Website: ' + d.domain + ' (' + d.site + ')\n' + d.cnt + ' Einträge an ' + d.groups.length +
       ' Tagen.\n\nKeine Zuordnung in den Einstellungen. OpenProject-Link (Patchday Protokoll):', '');
     if (!op || !op.trim()) return;
     op = op.trim();
-    if (m) m.op = op; else cfg.map.push({ id: d.project, name: d.site, op });
+    if (m) m.op = op; else cfg.map.push({ domain: d.domain, name: d.site, op });
     await LS.set({ map: cfg.map });
   }
   // Wer führt aus? Eingabe = diese Person(en); leer = Namen aus den Einstellungen (ausgeglichen verteilt)
