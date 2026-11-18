@@ -375,7 +375,7 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 .project-monitoring-grid{display:grid;gap:16px}
 [data-style="focus"] #pform .sec-title{font-size:18px;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--bd)}
 [data-style="focus"] .monitor-form-heading{border-bottom:1px solid var(--bd);padding-bottom:10px;margin-bottom:14px}
-[data-style="focus"] #pform .monitor-form-heading .sec-title{border:0;margin:0;padding:0}
+[data-style="focus"] #pform .monitor-form-heading .sec-title,[data-style="focus"] .t3edit-form .monitor-form-heading .sec-title{border:0;margin:0;padding:0}
 [data-style="focus"] .monitor-key-field input,
 [data-style="focus"] .monitor-saved-key input{font-family:ui-monospace,Menlo,monospace}
 [data-style="focus"] .project-form-actions{position:sticky;bottom:0;z-index:2;align-items:center;justify-content:flex-end;padding:12px;background:var(--bg);border-top:1px solid var(--bd)}
@@ -439,6 +439,10 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 /* TYPO3 status details: modal opened from the System overview tiles */
 .system-env-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
 .system-env-head h3{margin:0}
+.system-env-actions{display:flex;align-items:center;gap:6px}
+.t3dlg.t3edit{width:min(640px,calc(100vw - 32px));padding:0}
+.t3edit .monitor-form{margin:0;border:0}
+.t3edit .project-form-actions{justify-content:flex-end;padding:0 20px 20px;margin:0}
 .t3dlg{width:min(1100px,calc(100vw - 32px));max-height:calc(100vh - 48px);padding:20px 24px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg);overflow:auto}
 .t3dlg::backdrop{background:rgb(0 0 0 / .55)}
 @media (max-width:640px){.t3dlg{padding:16px}}

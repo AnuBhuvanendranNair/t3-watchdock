@@ -2,7 +2,7 @@
 import re
 
 from .core import CONFIG, STATE, config, load, lock, log, now, save
-from .t3monitor import T3M_ENVS, _t3m_url, _t3m_user, save_t3m_key, t3m_auth_password, t3m_key, t3m_key_file
+from .t3monitor import T3M_ENVS, _t3m_url, t3m_env, _t3m_user, save_t3m_key, t3m_auth_password, t3m_key, t3m_key_file
 
 EXPORT_FORMAT = "t3-watchdock-projects"
 
@@ -67,6 +67,24 @@ def update_project(b):
             save(STATE, st)
     log(f"Project updated: {pid}")
     return new
+
+
+def update_monitoring(b):
+    """Save the t3monitor settings of ONE instance (URL, key, basic auth); all other project settings stay as they are."""
+    pid, env = b["id"], b.get("env") or "production"
+    t3m_env(env)
+    e = T3M_ENVS[env]
+    entry = {"url": _t3m_url(b.get(e["form"] + "url")), "auth_user": _t3m_user(b.get(e["form"] + "auth_user"))}
+    with lock:
+        cfg = config()
+        p = next((x for x in cfg["projects"] if x["id"] == pid), None)
+        if not p:
+            raise RuntimeError(f"Unknown project: {pid}")
+        save_t3m_key(pid, b, [env])
+        p[e["cfg"]] = entry
+        save(CONFIG, cfg)
+    log(f"t3monitor settings updated: {pid} ({env})")
+    return p
 
 
 def add_project(b):

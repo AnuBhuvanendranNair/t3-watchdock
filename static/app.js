@@ -421,7 +421,7 @@ function updateOverviewOrder() {
 }
 
 // "System overview" card (Production / Staging tiles); filled by loadT3m via #system-<env>
-const systemOverviewCard = () => `
+const systemOverviewCard = p => `
     <section class="card system-overview">
       <div class="system-overview-heading">
         <h2>System overview</h2>
@@ -429,7 +429,10 @@ const systemOverviewCard = () => `
       <div class="system-environments">
         ${T3M_ENVS.map(e => `<section>
           <div class="system-env-head"><h3>${esc(e.label)}</h3>
-            ${icBtn("details", `${e.label}: TYPO3 status details`, `data-act="t3mopen" data-env="${e.env}"`, "btn sec sm icon")}</div>
+            <div class="system-env-actions">
+              ${t3mOn(p, e) ? progBtn(`t3m:${p.id}:${e.env}`, `Refresh ${e.label} status now`, `data-act="t3mrefresh" data-env="${e.env}"`, "btn sec sm icon") : ""}
+              ${icBtn("edit", `Edit ${e.label} monitoring settings`, `data-act="t3medit" data-env="${e.env}"`, "btn sec sm icon")}
+              ${icBtn("details", `${e.label}: TYPO3 status details`, `data-act="t3mopen" data-env="${e.env}"`, "btn sec sm icon")}</div></div>
           <div class="system-details" id="system-${e.env}" aria-live="polite">Loading…</div>
         </section>`).join("")}
       </div>
@@ -497,7 +500,7 @@ function viewProject(p, pipelineId) {
         <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
     </div>
-    ${systemOverviewCard()}
+    ${systemOverviewCard(p)}
     <div class="two">
       <div class="stack">
         ${envs.map(e => `<div class="card pipe-env pipe-${e.slot}">
@@ -563,7 +566,7 @@ function viewProjectNoCI(p) {
         <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
     </div>
-    ${systemOverviewCard()}
+    ${systemOverviewCard(p)}
 
     <div class="card danger-zone" style="margin-top:18px"><h2>Danger zone</h2>
       <p class="sub" style="margin:0 0 10px">Removes the project from the launcher only.</p>
@@ -897,6 +900,66 @@ function t3mFields(e, p) {
       </div></section>`;
 }
 
+// Key tools of the t3monitor fields (t3mFields): generate / reveal / copy, reveal saved key. Used by the project form
+// and the per-environment settings modal.
+function keyTools(fm, p) {
+  const E = fm.elements;
+  // Generate a 64-char t3monitor key locally (32 random bytes → hex).
+  // Non-destructive: nothing is stored until "Save changes"; the SAME value must be set as the site's encryption_key.
+  fm.addEventListener("click", async ev => {
+    const b = ev.target.closest("[data-gen], [data-reveal]"); if (!b) return;
+    const name = b.dataset.gen || b.dataset.reveal, inp = E[name];
+    if (b.dataset.savedEnv) {
+      const saved = fm.querySelector(`#${name.replace(/key$/, "saved-key")}`);
+      const copy = fm.querySelector(`[data-saved-copy][data-copy="${name}"]`);
+      if (!saved.hidden) {
+        saved.hidden = copy.hidden = true;
+        saved.value = "";
+        b.textContent = "Reveal saved key";
+        b.setAttribute("aria-expanded", "false");
+        return;
+      }
+      b.disabled = true;
+      try {
+        const {key} = await api("/api/t3monitor/reveal-key", {project:p.id, env:b.dataset.savedEnv});
+        if (!fm.isConnected) return;
+        saved.value = key;
+        saved.hidden = copy.hidden = false;
+        b.textContent = "Hide saved key";
+        b.setAttribute("aria-expanded", "true");
+      } catch (e) { toast(e.message, true); }
+      finally { b.disabled = false; }
+      return;
+    }
+    if (b.dataset.reveal) {
+      if (!inp.value) { toast("Generate or enter a key first", true); return; }
+      inp.type = inp.type === "password" ? "text" : "password";
+      b.textContent = inp.type === "text" ? "Hide" : "Reveal";
+      return;
+    }
+    inp.value = [...crypto.getRandomValues(new Uint8Array(32))].map(x => x.toString(16).padStart(2, "0")).join("");
+    inp.type = "password";
+    fm.querySelector(`[data-reveal="${name}"]:not([data-saved-env])`).textContent = "Reveal";
+    inp.dispatchEvent(new Event("input", {bubbles:true}));
+  });
+  // Copy the current key field value to the clipboard (clipboard API, with a legacy fallback for insecure contexts).
+  fm.addEventListener("click", async ev => {
+    const b = ev.target.closest("[data-copy]"); if (!b) return;
+    ev.preventDefault();
+    const saved = fm.querySelector(`#${b.dataset.copy.replace(/key$/, "saved-key")}`);
+    const inp = b.hasAttribute("data-saved-copy") ? saved : E[b.dataset.copy], val = inp.value.trim();
+    if (!val) { toast("Nothing to copy — generate or enter a key first", true); return; }
+    try {
+      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(val);
+      else {
+        inp.focus(); inp.select();
+        if (!document.execCommand("copy")) throw new Error("Clipboard unavailable");
+      }
+      toast("Key copied to clipboard");
+    } catch (e) { toast("Copy failed. Reveal the key to copy it manually.", true); }
+  });
+}
+
 function viewForm(p) {
   const v = p || DEFAULTS, a = v.auto_typo3 || DEFAULTS.auto_typo3;
   $("#view").innerHTML = `
@@ -956,60 +1019,7 @@ function viewForm(p) {
     const details = target.closest("details");
     if (details) details.open = true;
   }, true);
-  // Generate a 64-char t3monitor key locally (32 random bytes → hex).
-  // Non-destructive: nothing is stored until "Save changes"; the SAME value must be set as the site's encryption_key.
-  fm.addEventListener("click", async ev => {
-    const b = ev.target.closest("[data-gen], [data-reveal]"); if (!b) return;
-    const name = b.dataset.gen || b.dataset.reveal, inp = E[name];
-    if (b.dataset.savedEnv) {
-      const saved = fm.querySelector(`#${name.replace(/key$/, "saved-key")}`);
-      const copy = fm.querySelector(`[data-saved-copy][data-copy="${name}"]`);
-      if (!saved.hidden) {
-        saved.hidden = copy.hidden = true;
-        saved.value = "";
-        b.textContent = "Reveal saved key";
-        b.setAttribute("aria-expanded", "false");
-        return;
-      }
-      b.disabled = true;
-      try {
-        const {key} = await api("/api/t3monitor/reveal-key", {project:p.id, env:b.dataset.savedEnv});
-        if (!fm.isConnected) return;
-        saved.value = key;
-        saved.hidden = copy.hidden = false;
-        b.textContent = "Hide saved key";
-        b.setAttribute("aria-expanded", "true");
-      } catch (e) { toast(e.message, true); }
-      finally { b.disabled = false; }
-      return;
-    }
-    if (b.dataset.reveal) {
-      if (!inp.value) { toast("Generate or enter a key first", true); return; }
-      inp.type = inp.type === "password" ? "text" : "password";
-      b.textContent = inp.type === "text" ? "Hide" : "Reveal";
-      return;
-    }
-    inp.value = [...crypto.getRandomValues(new Uint8Array(32))].map(x => x.toString(16).padStart(2, "0")).join("");
-    inp.type = "password";
-    fm.querySelector(`[data-reveal="${name}"]:not([data-saved-env])`).textContent = "Reveal";
-    inp.dispatchEvent(new Event("input", {bubbles:true}));
-  });
-  // Copy the current key field value to the clipboard (clipboard API, with a legacy fallback for insecure contexts).
-  fm.addEventListener("click", async ev => {
-    const b = ev.target.closest("[data-copy]"); if (!b) return;
-    ev.preventDefault();
-    const saved = fm.querySelector(`#${b.dataset.copy.replace(/key$/, "saved-key")}`);
-    const inp = b.hasAttribute("data-saved-copy") ? saved : E[b.dataset.copy], val = inp.value.trim();
-    if (!val) { toast("Nothing to copy — generate or enter a key first", true); return; }
-    try {
-      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(val);
-      else {
-        inp.focus(); inp.select();
-        if (!document.execCommand("copy")) throw new Error("Clipboard unavailable");
-      }
-      toast("Key copied to clipboard");
-    } catch (e) { toast("Copy failed. Reveal the key to copy it manually.", true); }
-  });
+  keyTools(fm, p);
   // Pre-fill from GitLab: only fields the user has not typed in; when editing, only empty ones.
   const touched = new Set();
   fm.addEventListener("input", ({target}) => {
@@ -1253,6 +1263,38 @@ const actions = {
   },
   t3mopen(el) { const d = $(`#t3dlg-${el.dataset.env}`); if (!d) return; d.showModal(); d.focus(); },
   t3mclose(el) { el.closest("dialog")?.close(); },
+  // Monitoring settings of one environment (same fields as the project form); saves only this instance
+  t3medit(el) {
+    const p = proj($("#view").dataset.project), e = T3M_ENVS.find(x => x.env === el.dataset.env);
+    const d = document.createElement("dialog");
+    d.className = "t3dlg t3edit";
+    d.setAttribute("aria-label", `${e.label} monitoring settings`);
+    d.innerHTML = `<form class="t3edit-form">${t3mFields(e, p)}
+      <div class="actions project-form-actions"><button class="btn" type="submit">Save changes</button>
+        <button type="button" class="btn sec" data-cancel>Cancel</button></div></form>`;
+    const fm = d.querySelector("form");
+    keyTools(fm, p);
+    fm.addEventListener("input", ({target}) => {
+      const draft = fm.querySelector(`[data-key-draft="${target.name}"]`);
+      if (draft) draft.hidden = !target.value;
+    });
+    fm.addEventListener("invalid", ({target}) => { const x = target.closest("details"); if (x) x.open = true; }, true);
+    fm.querySelector("[data-cancel]").onclick = () => d.close();
+    d.onclose = () => d.remove();
+    fm.onsubmit = async ev => {
+      ev.preventDefault();
+      const f = new FormData(fm), btn = fm.querySelector('[type="submit"]');
+      const body = {id:p.id, env:e.env,
+        ...Object.fromEntries(["url", "key", "auth_user", "auth_password"].map(k => [e.f + k, f.get(e.f + k) || ""])),
+        [e.f + "key_clear"]:f.get(e.f + "key_clear") === "on", [e.f + "auth_clear"]:f.get(e.f + "auth_clear") === "on"};
+      btn.disabled = true;
+      try {
+        await api("/api/t3monitor/settings", body);
+        await refresh(); d.close(); toast(`${e.label} monitoring saved`); render();
+      } catch (err) { toast(err.message, true); btn.disabled = false; }
+    };
+    document.body.append(d); d.showModal();
+  },
   async run(el) {
     const p = proj($("#view").dataset.project), upd = el.dataset.mode === "update", prod = el.dataset.mode === "production";
     const msg = prod
