@@ -9,6 +9,7 @@ let S = null, pollT = {};
 
 async function api(path, body) {
   const r = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {});
+  if (r.status === 401) { location.replace("/login"); throw new Error("login required"); }  // session expired
   const d = await r.json();
   if (!r.ok) throw new Error(d.error || r.status);
   return d;
@@ -59,6 +60,7 @@ function setTheme(id, save) {
   b.setAttribute("aria-label", b.title);
 }
 setTheme(document.documentElement.dataset.theme || "auto");
+$("#logoutBtn").onclick = () => api("/api/logout", {}).then(() => location.replace("/login"), e => toast(e.message, true));
 $("#themeBtn").onclick = () => {
   const cur = document.documentElement.dataset.theme || "auto";
   setTheme(THEMES[(THEMES.findIndex(x => x.id === cur) + 1) % THEMES.length].id, true);
@@ -97,6 +99,7 @@ function confirmByName(title, bodyHtml, name, action) {
 
 async function refresh() {
   S = await api("/api/state");
+  $("#logoutBtn").textContent = `Sign out ${S.user}`;
   const pill = $("#tokenPill");
   pill.textContent = S.token_source ? "Token ✓" : "No token";
   pill.className = "pill" + (S.token_source ? "" : " bad");

@@ -21,6 +21,7 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 
 ## Features
 
+- **Login** — named user accounts, managed on the command line (`bin/t3-watchdock add-user NAME`); every page and API call needs a session (see *Login*)
 - **Project list** — GitLab projects (path + branch) managed in the UI, stored in the SQLite database `watchdock.db`
 - **Project form pre-fill** — new projects start with defaults (staging/production, `build:main`, TYPO3 13, `TARGET_TASK_NAME=shup01`); branch, production branch and TYPO3 major are select boxes; when GitLab is reachable, project path search plus name, branches, manual jobs (CI lint) and TYPO3 major are read from GitLab
 - **Export / import projects** — *Settings → Export / import projects* writes all projects including their t3monitor keys and Basic auth passwords to one JSON file and reads such a file again (existing projects are skipped unless *Overwrite* is ticked). The GitLab token, Teams webhook URL and SMTP password are never exported
@@ -67,7 +68,14 @@ cp config.example.json config.json   # optional — imported into watchdock.db o
 docker compose up -d --build         # runs permanently, see "Run with Docker"
 ```
 
-Open <http://127.0.0.1:8787>, save your GitLab token in *Settings → GitLab token*, add projects.
+Create a login first (without an account nobody can sign in):
+
+```bash
+bin/t3-watchdock add-user NAME                                # asks for the password twice
+docker compose exec launcher bin/t3-watchdock add-user NAME   # same in Docker
+```
+
+Open <http://127.0.0.1:8787>, sign in, save your GitLab token in *Settings → GitLab token*, add projects.
 
 Without Docker (runs only while the terminal is open):
 
@@ -75,6 +83,25 @@ Without Docker (runs only while the terminal is open):
 python3 app.py               # with TYPO3 watcher
 python3 app.py --no-watch    # TYPO3 release check paused (Scheduler)
 ```
+
+## Login
+
+Every page and every API call needs a signed-in session; without one, pages redirect to `/login` and API calls answer `401`. Accounts are created only on the command line, never in the browser.
+
+```bash
+bin/t3-watchdock add-user NAME        # new account, asks for the password twice
+bin/t3-watchdock set-password NAME    # new password, signs the user out everywhere
+bin/t3-watchdock remove-user NAME     # delete account and its sessions
+bin/t3-watchdock list-users           # names and creation dates
+```
+
+- **`bin/t3-watchdock`** takes the same commands as `python3 app.py` (start, `config …`, account commands) and works from any directory and through a symlink. When T3 Watchdock is installed with Composer, it is available as `vendor/bin/t3-watchdock` (needs `"bin": ["bin/t3-watchdock"]` in a `composer.json`; this repository has none yet).
+- **Docker:** `docker compose exec launcher bin/t3-watchdock add-user NAME`.
+- **Names:** 1–64 characters, letters, digits and `. _ @ -`. **Passwords:** at least 12 characters.
+- **Sessions:** 12 hours from sign-in (no extension on activity). *Sign out NAME* in the header ends the session.
+- **Failed logins:** 5 failures per client address within 15 minutes block that address for the rest of the window (in memory, reset on restart). Behind a reverse proxy all requests come from the proxy address, so the limit then applies to everyone together.
+- Logins and logouts are written to the log (*Activity*) with the user name.
+- **After updating** an existing instance: the database gets the `users` and `sessions` tables automatically on start, but no account. Run `add-user` once, otherwise nobody can sign in (also not the Patchday browser extension, which uses the signed-in Watchdock tab).
 
 ## Configuration
 
@@ -290,6 +317,7 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 ## Security
 
 - Binds to `127.0.0.1` only (Docker: published on `127.0.0.1` only)
+- Login required for every page and API call. Passwords hashed with `scrypt` (random salt per user); the session cookie is a random token (`HttpOnly`, `SameSite=Strict`, `Secure` on HTTPS) and the database stores only its SHA-256 hash. Failed logins are rate limited; an unknown name takes as long to check as a wrong password
 - Optional HTTPS with a local mkcert certificate
 - `Host` header check against DNS rebinding
 - `Origin` check and `application/json` requirement on POST against cross-site requests
@@ -301,9 +329,11 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 
 | File | Purpose |
 |---|---|
-| `app.py` | Entry point (starts `watchdock.server.main`) |
+| `app.py` | Entry point (starts `watchdock.server.main`; `config …` and account commands) |
+| `bin/t3-watchdock` | Command line wrapper for `app.py` (works from any directory, `vendor/bin` symlink) |
+| `watchdock/auth.py` | Login: password hashing, accounts, sessions, failed-login limit |
 | `watchdock/core.py` | Paths, settings, shared state, JSON storage |
-| `watchdock/db.py` | SQLite storage: projects, settings, runs, log, scheduler results, TYPO3 baselines, pending notifications |
+| `watchdock/db.py` | SQLite storage: projects, settings, runs, log, scheduler results, TYPO3 baselines, pending notifications, users, sessions |
 | `watchdock/alerts.py` | E-mail and Microsoft Teams notifications |
 | `watchdock/gitlab.py` | GitLab API: token, pipelines, manual jobs, project lookup |
 | `watchdock/extensions.py` | Extension update check (Packagist) and changelogs |
@@ -313,12 +343,12 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 | `watchdock/scheduler.py` | Background scheduler |
 | `watchdock/server.py` | HTTP server and API routes |
 | `watchdock/plugins.py` | Plugin loader (routes and browser files of enabled plugins) |
-| `static/` | Web UI (`index.html` with the icon sprite, `style.css`, `app.js`, `icons-LICENSE.txt`) |
+| `static/` | Web UI (`index.html` with the icon sprite, `login.html`, `style.css`, `app.js`, `icons-LICENSE.txt`) |
 | `plugins/` | Optional plugins, off by default (see *Plugins*) |
 | `config.example.json` | Example configuration (copy to `config.json` before the first start to import it) |
 | `Dockerfile`, `compose.yaml` | Docker setup |
 | `certs/` | mkcert certificate + key (gitignored) |
-| `watchdock.db` | SQLite database (stdlib `sqlite3`, mode `600`): projects, settings, runs, log, TYPO3 baselines, scheduler results, pending notifications (gitignored). On first start an existing `config.json` / `state.json` is imported and renamed to `<name>.imported-<time>` (backup) |
+| `watchdock.db` | SQLite database (stdlib `sqlite3`, mode `600`): projects, settings, runs, log, TYPO3 baselines, scheduler results, pending notifications, user accounts (password hashes) and sessions (gitignored). On first start an existing `config.json` / `state.json` is imported and renamed to `<name>.imported-<time>` (backup) |
 | `.gitlab-token` | GitLab token (gitignored) |
 | `.smtp-password` | SMTP password (gitignored) |
 | `.teams-webhook` | Teams webhook URL (gitignored) |

@@ -1,4 +1,5 @@
 """HTTP server and request handler."""
+import http.cookies
 import json
 import ssl
 import threading
@@ -7,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import ALLOWED_HOSTS, BASE, HOST, TLS_CERT, TLS_KEY, TLS_PORT, TOKEN_FILE, config, lock, log, now, save_config, stop_event
-from . import db
+from . import auth, db
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
 from .extensions import ext_changelog, ext_release
 from .gitlab import find_project, gitlab, last_run_status, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, test_token, token_source
@@ -22,7 +23,9 @@ from .scheduler import TASKS, save_sched, sched_run, sched_view, scheduler
 tls_on = False  # set in main() once the HTTPS listener runs
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"),        # fixed allowlist, no path traversal
           "/style.css": ("style.css", "text/css; charset=utf-8"),
-          "/app.js": ("app.js", "text/javascript; charset=utf-8")}
+          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+          "/login": ("login.html", "text/html; charset=utf-8")}
+PUBLIC_GET = {"/login", "/style.css"}      # reachable without a session
 
 
 # ---------------------------------------------------------------- HTTP
@@ -59,10 +62,38 @@ class Handler(BaseHTTPRequestHandler):
         origin = ("https://" if secure else "http://") + host
         return (secure or loopback) and self.headers.get("Origin") == origin
 
-    def _send(self, code, data, ctype="application/json"):
+    def _token(self):
+        c = http.cookies.SimpleCookie()
+        try:
+            c.load(self.headers.get("Cookie", ""))
+        except http.cookies.CookieError:
+            return None
+        return c[auth.COOKIE].value if auth.COOKIE in c else None
+
+    def _auth(self):
+        """Signed-in user name, or None after sending 401 / a redirect to the login page."""
+        self.user = auth.session_user(self._token())
+        if self.user:
+            return self.user
+        if self.command == "GET" and not self.path.startswith(("/api/", "/plugins/")):
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        else:
+            self._send(401, {"error": "login required"})
+        return None
+
+    def _cookie(self, value, max_age):
+        secure = "; Secure" if isinstance(self.connection, ssl.SSLSocket) else ""
+        return f"{auth.COOKIE}={value}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Strict{secure}"
+
+    def _send(self, code, data, ctype="application/json", cookie=None):
         body = data if isinstance(data, bytes) else json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -75,6 +106,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
+        if u.path not in PUBLIC_GET and not self._auth():
+            return
         try:
             if u.path in STATIC:
                 name, ctype = STATIC[u.path]
@@ -82,6 +115,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/state":
                 cfg = config()
                 return self._send(200, {
+                    "user": self.user,
                     "projects": cfg["projects"],
                     "scheduler": sched_view(),
                     "token_source": token_source()[0],
@@ -152,6 +186,19 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(n) or b"{}")
             path = self.path
+            if path == "/api/login":
+                try:
+                    token, age = auth.login(body.get("name"), body.get("password"), self.client_address[0])
+                except PermissionError as e:
+                    return self._send(401, {"error": str(e)})
+                log(f"Login: {body.get('name')}")
+                return self._send(200, {"ok": True}, cookie=self._cookie(token, age))
+            if not self._auth():
+                return
+            if path == "/api/logout":
+                auth.logout(self._token())
+                log(f"Logout: {self.user}")
+                return self._send(200, {"ok": True}, cookie=self._cookie("", 0))
             if path == "/api/run":
                 p = find_project(body["project"])
                 if body.get("mode") == "promote":

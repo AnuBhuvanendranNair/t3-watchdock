@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""T3 Watchdock command line: same commands as app.py (start, config, add-user, …).
+
+Works from any directory and through a symlink (e.g. vendor/bin/t3-watchdock).
+"""
+import runpy
+import sys
+from pathlib import Path
+
+root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(root))
+sys.argv[0] = str(root / "app.py")
+runpy.run_path(str(root / "app.py"), run_name="__main__")

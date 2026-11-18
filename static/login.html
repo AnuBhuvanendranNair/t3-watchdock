@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T3 Watchdock – Login</title>
+<script>
+try { const t = localStorage.getItem("theme"), s = localStorage.getItem("style");
+  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  if (s === "terminal" || s === "turbo" || s === "focus") document.documentElement.dataset.style = s; } catch (e) {}
+</script>
+<link rel="stylesheet" href="style.css">
+<style>
+  .login { max-width: 22rem; margin: 12vh auto; padding: 0 16px; }
+  .login form { display: grid; gap: .75rem; }
+  .login input { width: 100%; box-sizing: border-box; }
+  .login .err { color: #c0392b; min-height: 1.2em; margin: 0; }
+</style>
+</head>
+<body>
+<main class="login">
+  <h1>T3 Watchdock</h1>
+  <form id="f">
+    <label>Name <input name="name" autocomplete="username" required autofocus></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit">Sign in</button>
+    <p class="err" id="err" role="alert"></p>
+  </form>
+</main>
+<script>
+document.getElementById("f").onsubmit = async ev => {
+  ev.preventDefault();
+  const f = ev.target, err = document.getElementById("err");
+  err.textContent = "";
+  try {
+    const r = await fetch("/api/login", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name: f.name.value.trim(), password: f.password.value})});
+    if (r.ok) return location.replace("/");
+    err.textContent = (await r.json()).error || r.status;
+  } catch (e) { err.textContent = e.message; }
+  f.password.value = "";
+};
+</script>
+</body>
+</html>
