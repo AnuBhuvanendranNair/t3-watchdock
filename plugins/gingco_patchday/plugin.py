@@ -3,7 +3,9 @@
 The Chrome extension in chrome-extension/ fetches these routes from the open T3 Watchdock tab and writes the data
 into OpenProject; the OpenProject link per website is kept in the extension's options. The mapping key is the
 production domain (host of the production t3monitor URL, lowercase, without "www."): the same in every T3 Watchdock
-instance and stable when a project is re-created. Switched on in config.json:
+instance and stable when a project is re-created.
+
+Switched on on the Plugins page; settings:
 
     "plugins": {"gingco_patchday": {"button": true}}     # button: "Patchday" button on the project page
 """

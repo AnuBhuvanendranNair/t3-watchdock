@@ -15,7 +15,7 @@ from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_
 from .watcher import resume_mail_watches
 from .projects import add_project, export_projects, import_projects, update_monitoring, update_project
 from .updates import send_now
-from .plugins import NotFound, asset as plugin_asset, assets as plugin_assets, call as plugin_call
+from .plugins import NotFound, asset as plugin_asset, assets as plugin_assets, call as plugin_call, catalog as plugin_catalog, save_plugin
 from .scheduler import TASKS, save_sched, sched_run, sched_view, scheduler
 
 
@@ -119,6 +119,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, last_run_status())
             if u.path == "/api/plugins":
                 return self._send(200, plugin_assets())
+            if u.path == "/api/plugin-admin":                 # Plugins page: installed plugins (on and off)
+                return self._send(200, plugin_catalog())
             if u.path.startswith("/plugins/"):              # /plugins/<name>/<file>: browser files of a plugin
                 parts = u.path.split("/")
                 if len(parts) != 4:
@@ -231,6 +233,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, export_projects())
             if path == "/api/projects/import":
                 return self._send(200, import_projects(body.get("data"), bool(body.get("overwrite"))))
+            if path == "/api/plugin-admin":
+                return self._send(200, save_plugin(body))
             if path.startswith("/api/plugins/"):
                 parts = path.split("?")[0].split("/")
                 if len(parts) != 5:

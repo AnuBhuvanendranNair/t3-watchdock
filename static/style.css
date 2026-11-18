@@ -446,6 +446,20 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 .system-env-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
 .system-env-head h3{margin:0}
 .system-env-actions{display:flex;align-items:center;gap:6px}
+.plugin-card{padding:0;overflow:hidden}
+.plugin-head{display:flex;align-items:center;gap:12px;padding:14px 20px;cursor:pointer;list-style:none}
+.plugin-head::-webkit-details-marker{display:none}
+.plugin-head:hover{background:var(--hover)}
+.plugin-head:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+.plugin-name{flex:1;min-width:0;font-weight:600;font-size:17px}
+.plugin-chev{color:var(--mut);transition:transform .15s}
+.plugin-card[open] .plugin-chev{transform:rotate(180deg)}
+.plugin-body{padding:4px 20px 20px;border-top:1px solid var(--bd)}
+.plugin-desc{margin:12px 0 0}
+.plugin-body .check{margin:14px 0}
+.plugin-body textarea{display:block;width:100%;margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:14px}
+.plugin-body .actions{margin-top:12px}
+.plugin-steps{margin:0;padding-left:20px;line-height:1.8}
 .t3dlg.t3edit{width:min(640px,calc(100vw - 32px));padding:0}
 .t3edit .monitor-form{margin:0;border:0}
 .t3edit .project-form-actions{justify-content:flex-end;padding:0 20px 20px;margin:0}

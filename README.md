@@ -269,11 +269,11 @@ Add an icon:
 
 ## Plugins
 
-Optional, team-specific features live in `plugins/<name>/` and stay off until switched on in the settings:
+Optional, team-specific features live in `plugins/<name>/` and stay off until switched on on the **Plugins** page (nav bar, after *Settings*): it lists every plugin in `plugins/`, with an on/off switch and its settings as JSON. Saving reloads the page.
 
-```bash
-python3 app.py config set plugins '{"gingco_patchday": {}}'
-```
+To add a plugin: copy its folder to `plugins/<name>/` (to write one, start from `plugins/example/`), rebuild (`docker compose up -d --build`), switch it on on the Plugins page. Plugins are Python code running inside the app, so there is no upload in the browser.
+
+On the command line (same setting): `python3 app.py config set plugins '{"gingco_patchday": {}}'` (replaces the whole list).
 
 A plugin is a folder with
 
@@ -284,6 +284,7 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 
 | Plugin | Purpose |
 |---|---|
+| [`example`](plugins/example/README.md) | Skeleton to copy for a new plugin: server routes, browser part, settings (off by default) |
 | [`gingco_patchday`](plugins/gingco_patchday/README.md) | Gingco Communication only: provides the production update history to the Patchday Chrome extension, which writes it into the Patchday protocol in OpenProject |
 
 ## Security

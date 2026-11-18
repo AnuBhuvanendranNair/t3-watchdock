@@ -1,4 +1,4 @@
-// Gingco Patchday plugin: "Patchday" button on the project page (config.json: "gingco_patchday": {"button": true}).
+// Gingco Patchday plugin: "Patchday" button on the project page (Plugins page setting: {"button": true}).
 // The click is handed to the Patchday extension (its bridge script marks the page with data-patchday="1").
 (() => {
   const {api, toast, ic} = window.watchdock;

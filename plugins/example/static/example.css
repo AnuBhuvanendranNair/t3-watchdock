@@ -1,0 +1,2 @@
+/* Example plugin styles: use the app's colour variables (--fg, --mut, --acc, --bd, --card, …) so every style and theme fits */
+.example-card{margin-top:18px;border-style:dashed}
