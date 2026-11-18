@@ -664,7 +664,7 @@ async function loadT3m(p, e, refreshNow) {
         problems.length ? checksTable(problems) : `<p class="empty">No errors or warnings.</p>`)}
       ${sec && (adv.length || php?.severity) ? row("", adv.length ? "err" : `sev${php.severity}`, "Security", adv.length ? secStat[1] : esc(php.text), secBody(sec)) : ""}
       ${row("", "", "All status checks", total, checksTable(c.status.slice().sort((a, b) => b.severity - a.severity)))}
-      ${row("", updExt.length ? "warn" : "", "Extensions", `${exts.length}${updTxt ? ` · ${esc(updTxt)}` : ""}`, `
+      ${row("t3-exts", updExt.length ? "warn" : "", "Extensions", `${exts.length}${updTxt ? ` <span class="hchip upd${majExt.length ? " major" : ""}">${ic("update")}<b>${esc(updTxt)}</b></span>` : ""}`, `
       ${local.length ? `<label class="check" style="margin-bottom:8px"><input type="checkbox" class="showLocal"> Show local extensions (${local.length}): ${esc(local.map(([k]) => k).join(", "))}</label>` : ""}
       <div class="wrap"><table>
       <thead><tr><th>Extension</th><th>Title</th><th>Version</th><th>Latest</th><th>Composer package</th></tr></thead><tbody>
@@ -695,13 +695,18 @@ function systemOverview({current, last_check, last_error}, env) {
     ["Database", dbShort(current.db)], ["Web server", current.webserver]];
   const errors = current.status.filter(item => item.severity === 2).length;
   const warnings = current.status.filter(item => item.severity === 1).length;
+  // pending extension updates (non-local extensions with a newer compatible release): chip opens the Extensions row
+  const upd = Object.values(current.extensions || {}).filter(x => !x.local && x.update), major = upd.filter(x => x.major).length;
+  const updT = upd.length ? `${upd.length} extension update${upd.length === 1 ? "" : "s"}${major ? ` (${major} major)` : ""} – show details` : "";
+  const updChip = upd.length ? `<button type="button" class="hchip upd${major ? " major" : ""}" data-act="t3mopen" data-env="${env}" data-row="t3-exts"
+      title="${updT}" aria-label="${updT}">${ic("update")}<b>${upd.length}</b></button>` : "";
   return `<dl>${versions.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "–")}</dd></div>`).join("")}</dl>
     <div class="system-health">${errors || warnings
       ? [["err", "sev-2", errors, "error"], ["warn", "sev-1", warnings, "warning"]].map(([i, cls, n, w]) => {
           const t = `${n} ${w}${n === 1 ? "" : "s"}${n ? " – show details" : ""}`;
           return `<button type="button" class="hchip ${n ? cls : "zero"}" data-act="t3mopen" data-env="${env}" title="${t}" aria-label="${t}">${ic(i)}<b>${n}</b></button>`;
         }).join("")
-      : `<span class="hchip sev0" title="No errors or warnings">${ic("ok")}<b>OK</b></span>`}
+      : `<span class="hchip sev0" title="No errors or warnings">${ic("ok")}<b>OK</b></span>`}${updChip}
     </div>
     ${check ? `<div class="system-check sub">${check}</div>` : ""}`;
 }
@@ -1294,7 +1299,11 @@ const actions = {
     const r = el.closest(".t3m")?.querySelector("details.t3-problems"); if (!r) return;
     r.open = true; r.scrollIntoView({block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
   },
-  t3mopen(el) { const d = $(`#t3dlg-${el.dataset.env}`); if (!d) return; d.showModal(); d.focus(); },
+  t3mopen(el) {   // open the status modal; data-row: also expand that row (e.g. t3-exts) and bring it into view
+    const d = $(`#t3dlg-${el.dataset.env}`); if (!d) return; d.showModal(); d.focus();
+    const r = el.dataset.row && d.querySelector(`details.${el.dataset.row}`);
+    if (r) { r.open = true; r.scrollIntoView({block: "start"}); }
+  },
   runtip(el) {   // info button of a waiting manual job: click toggles the tooltip (hover / keyboard focus show it too)
     const open = !el.classList.contains("open");
     document.querySelectorAll(".runst-info.open").forEach(b => { b.classList.remove("open"); b.setAttribute("aria-expanded", "false"); });
