@@ -4,7 +4,8 @@ import re
 import sys
 import threading
 
-from .core import CONFIG, STATE, config, load, lock, log, now, save, stop_event
+from .core import config, load, lock, log, now, save, save_config, stop_event
+from .db import kv_get, kv_set, sched_result_set, sched_results, typo3_latest
 from .alerts import notify_event
 from .security import advisories, php_cycles, php_status, site_advisories, site_packages, typo3_security_feed
 from .t3monitor import T3M_ENVS, _n, _upd_text, t3m_cfg, t3m_fetch, t3m_history_file, t3m_key
@@ -24,7 +25,7 @@ def task_typo3_release():
         return "No project with TYPO3 auto-update"
     if errors:
         raise RuntimeError(" | ".join(errors))
-    latest = load(STATE, {}).get("typo3_latest", {})
+    latest = typo3_latest()
     return "Latest: " + ", ".join(f"TYPO3 {m}: {v}" for m, v in sorted(latest.items()))
 
 
@@ -120,14 +121,12 @@ def task_typo3_news():
     if not items:
         raise RuntimeError("TYPO3 security feed contains no announcements")
     with lock:
-        st = load(STATE, {})
-        old = st.get("typo3_security") or {}
+        old = kv_get("typo3_security") or {}
         first, seen = "seen" not in old, set(old.get("seen", []))
         new = [] if first else [i for i in items if i["id"] not in seen]
-        st["typo3_security"] = {"checked": now(), "seen": ([i["id"] for i in items] + [x for x in old.get("seen", [])
-                                                               if x not in {i["id"] for i in items}])[:1000],
-                                "items": items[:30]}
-        save(STATE, st)
+        kv_set("typo3_security", {"checked": now(), "seen": ([i["id"] for i in items] + [x for x in old.get("seen", [])
+                                                             if x not in {i["id"] for i in items}])[:1000],
+                                  "items": items[:30]})
     for i in new:
         log(f"TYPO3 security: {i['title']} {i['link']}")
     if new:
@@ -214,7 +213,7 @@ def save_sched(b):
         cfg = config()
         cfg.setdefault("scheduler", {})[tid] = {"enabled": bool(b.get("enabled")), "mode": mode,
                                                 "hours": hours or 6, "time": t, "days": days or list(range(7))}
-        save(CONFIG, cfg)
+        save_config(cfg)
     log(f"Scheduler: '{TASKS[tid]['name']}' set to {sched_describe(sched_cfg(tid))}"
         + ("" if b.get("enabled") else " (disabled)"))
     return sched_view()
@@ -233,15 +232,12 @@ def sched_run(tid):
         log(f"Scheduler: '{TASKS[tid]['name']}' failed: {e}")
     finally:
         sched_running.discard(tid)
-    with lock:
-        st = load(STATE, {})
-        st.setdefault("scheduler", {})[tid] = {"last_run": started, "finished": now(), "ok": ok, "result": result[:500]}
-        save(STATE, st)
+    sched_result_set(tid, started, now(), ok, result[:500])
     return ok, result
 
 
 def sched_view():
-    st = load(STATE, {}).get("scheduler", {})
+    st = sched_results()
     out = []
     for tid, t in TASKS.items():
         c, r = sched_cfg(tid), st.get(tid, {})
@@ -256,7 +252,7 @@ def sched_view():
 
 def scheduler():
     while not stop_event.is_set():
-        st = load(STATE, {}).get("scheduler", {})
+        st = sched_results()
         for tid in TASKS:
             if tid in sched_running or (tid == "typo3_release" and NO_WATCH):
                 continue

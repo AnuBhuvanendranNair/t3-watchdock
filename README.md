@@ -21,7 +21,7 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 
 ## Features
 
-- **Project list** — GitLab projects (path + branch) managed in the UI, stored in `config.json`
+- **Project list** — GitLab projects (path + branch) managed in the UI, stored in the SQLite database `watchdock.db`
 - **Project form pre-fill** — new projects start with defaults (staging/production, `build:main`, TYPO3 13, `TARGET_TASK_NAME=shup01`); branch, production branch and TYPO3 major are select boxes; when GitLab is reachable, project path search plus name, branches, manual jobs (CI lint) and TYPO3 major are read from GitLab
 - **Export / import projects** — *Settings → Export / import projects* writes all projects including their t3monitor keys and Basic auth passwords to one JSON file and reads such a file again (existing projects are skipped unless *Overwrite* is ticked). The GitLab token, Teams webhook URL and SMTP password are never exported
 - **Run pipelines** — the project page has one card for staging and one for production, each with its own ▶ button (*Run staging*, *Run production*) and its latest pipeline; plus the "TYPO3 update" run (header icon), each with its own CI variables
@@ -41,7 +41,7 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 - **TYPO3 overview on the home page** — table (list view) with TYPO3 version (↑ = update available), PHP / database / web server versions and errors/warnings of production and staging per project, *versions differ* / *PHP differs* markers and the oldest last check; data from the last t3monitor check
 - **PHP version & security advisories** — scheduled check of every instance: PHP version against [endoflife.date](https://endoflife.date/php) (*end of life*, *security fixes only*, newer patch release available) and TYPO3 core (`typo3/cms-core`) plus public extensions against the [Packagist security advisories](https://packagist.org/apidoc#list-security-advisories) (FriendsOfPHP, GitHub). Uses the data of the last t3monitor check (no extra request to the sites). Results: *Security* section on the project page, *SA* / *PHP* badges in the overview; Teams/email message only for findings not reported before
 - **Scheduler** — page to set when the TYPO3 release check, the t3monitor check and the security check run: every N hours or daily at a fixed time on chosen weekdays; shows last run, result and next run, with *Run now*
-- **Run history & log** — kept in `state.json` (last 100 runs, 200 log entries)
+- **Run history & log** — kept in the SQLite database `watchdock.db` (all runs, newest 10 000 log entries)
 - **Save & close** — Scheduler and Settings forms have *Save* (stay on the page) and *Save & close* (back to Projects)
 - **Flash messages** — results and errors appear top right (green ✓ / red ⚠; 6 s, errors 12 s; click to close)
 - **Icon buttons** — actions are icons with a tooltip (also the accessible name); icon set: [Lucide](https://lucide.dev), see *Icons*
@@ -63,7 +63,7 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 ```bash
 git clone git@github.com:sivaprasad1988/t3-watchdock.git
 cd t3-watchdock
-cp config.example.json config.json   # optional — projects can also be added in the UI
+cp config.example.json config.json   # optional — imported into watchdock.db on first start; projects can also be added in the UI
 docker compose up -d --build         # runs permanently, see "Run with Docker"
 ```
 
@@ -78,7 +78,19 @@ python3 app.py --no-watch    # TYPO3 release check paused (Scheduler)
 
 ## Configuration
 
-`config.json` (gitignored, see `config.example.json`):
+Projects and settings are stored in the SQLite database `watchdock.db` (gitignored, mode `600`). The layout is the same as the former `config.json` (see `config.example.json`):
+
+- **First start:** an existing `config.json` (and `state.json`) is imported once and renamed to `config.json.imported-<time>` (backup). Editing `config.json` after that has no effect.
+- **Projects:** add and edit them in the UI; move them between instances with *Export* / *Import* on the projects page (JSON file, includes keys and passwords).
+- **Settings without a UI** (`port`, `plugins`, `t3monitor_local_vendors`, …): command line, also while the app runs:
+
+```bash
+python3 app.py config get                     # all settings
+python3 app.py config set plugins '{"gingco_patchday": {}}'
+python3 app.py config unset plugins
+docker compose exec launcher python app.py config get    # same in Docker
+```
+
 
 | Key | Description |
 |---|---|
@@ -143,7 +155,7 @@ Page *Scheduler* (top menu) lists the automatic tasks:
 - **Changelog:** click an extension row to show the changelog of the latest version (when an update is available) or of the installed version. Sources in this order: GitHub/GitLab release notes of the tag, then the changelog file at the tag (`CHANGELOG.md`, `ChangeLog`, … — the section of that version, or the per-version file it links to). Links to the source, the full compare view (installed → latest) and the repository. Only packages hosted on github.com or gitlab.com; results are cached until restart.
 - History in `t3monitor/<project-id>.json` (production) and `t3monitor/staging/<project-id>.json` (staging): a new entry only when something changes (TYPO3 version, extension added/removed/updated, status severity); otherwise "seen until" is updated. Last 300 changes are kept.
 - Key file: mode `600`, removed with the project. The edit form can reveal an individual saved key on demand over same-origin HTTPS or localhost.
-- Password-protected site (HTTP Basic auth): set *Basic auth user* and *password* in the project's t3monitor settings. The user is stored in `config.json`, the password in `<project-id>.t3monitor-auth` (mode `600`, never sent to the browser). Empty user = no basic auth.
+- Password-protected site (HTTP Basic auth): set *Basic auth user* and *password* in the project's t3monitor settings. The user is stored in the database, the password in `<project-id>.t3monitor-auth` (mode `600`, never sent to the browser). Empty user = no basic auth.
 
 ## Notifications (Microsoft Teams, email)
 
@@ -164,7 +176,7 @@ Email (optional, needs SMTP access): *Settings → Email notifications*: SMTP ho
 - Teams Workflow webhooks answer *accepted* (HTTP 202) before the message is posted. If the test message is accepted but does not appear, open the run history of the Workflow in Teams (**Workflows → the flow → Run history**) to see why it failed.
 - The pipeline status is polled every 60 s; the message is sent once it has finished. After 24 h without a final status a "NOT FINISHED" message is sent.
 - If the pipeline could not be started, a "NOT STARTED" message is sent (on every failed retry).
-- Pending pipelines are kept in `state.json` and watched again after a restart.
+- Pending pipelines are kept in the database (`watchdock.db`) and watched again after a restart.
 - Webhook URL (`.teams-webhook`) and SMTP password (`.smtp-password`) are stored with file mode `600` and never sent to the browser; leave the field empty to keep the stored value.
 - Send errors are written to the Activity log.
 
@@ -193,7 +205,7 @@ The container restarts automatically (`restart: unless-stopped`), also after a r
 docker compose up -d --build
 ```
 
-Open <http://127.0.0.1:8787>. All data — `config.json`, `state.json`, `t3monitor/` and the secret files (`.gitlab-token`, `.teams-webhook`, `.smtp-password`, `*.t3monitor-key`, `*.t3monitor-auth`, `*.t3monitor-staging-key`, `*.t3monitor-staging-auth`) — is read from and written to this folder (mounted as `/data`), so it survives rebuilds.
+Open <http://127.0.0.1:8787>. All data — `watchdock.db`, `t3monitor/` and the secret files (`.gitlab-token`, `.teams-webhook`, `.smtp-password`, `*.t3monitor-key`, `*.t3monitor-auth`, `*.t3monitor-staging-key`, `*.t3monitor-staging-auth`) — is read from and written to this folder (mounted as `/data`), so it survives rebuilds.
 
 | Task | Command |
 |---|---|
@@ -222,7 +234,7 @@ docker compose up -d --build
 - Firefox may need `mkcert -install` again (own certificate store)
 
 Notes:
-- Ports are published on `127.0.0.1` only. Host port must match `port` in `config.json` (default `8787`), otherwise the Host header check rejects requests.
+- Ports are published on `127.0.0.1` only. Host port must match the `port` setting (default `8787`, `python app.py config get port`), otherwise the Host header check rejects requests.
 - Stop any copy of `app.py` running in a terminal first (same port).
 - macOS notifications (TYPO3 auto-trigger) do not work inside the container; use Teams notifications or the Activity log instead.
 - Environment: `LAUNCHER_DATA` (data folder, default: app folder), `LAUNCHER_HOST` (bind address, default `127.0.0.1`), `LAUNCHER_ALLOWED_HOSTS` (extra accepted hostnames, comma-separated), `LAUNCHER_TLS_CERT` / `LAUNCHER_TLS_KEY` / `LAUNCHER_TLS_PORT` (HTTPS listener, default port `8443`).
@@ -257,10 +269,10 @@ Add an icon:
 
 ## Plugins
 
-Optional, team-specific features live in `plugins/<name>/` and stay off until switched on in `config.json`:
+Optional, team-specific features live in `plugins/<name>/` and stay off until switched on in the settings:
 
-```json
-"plugins": {"gingco_patchday": {}}
+```bash
+python3 app.py config set plugins '{"gingco_patchday": {}}'
 ```
 
 A plugin is a folder with
@@ -268,7 +280,7 @@ A plugin is a folder with
 - `plugin.py` — `GET = {"route": fn(query)}` and `POST = {"route": fn(body)}`, served at `/api/plugins/<name>/<route>` (same Host / Origin checks as the rest of the API)
 - `static/*.js`, `static/*.css` — loaded by the web UI; a script calls `watchdock.register({projectPage(project, view), settingsPage(stack)})` to add to the project and settings pages
 
-Switched off (or missing) plugins answer `404` and load nothing. `config.json` is read on every request: after switching a plugin on or off, reload the browser page. Docker copies `plugins/` into the image, so rebuild once after updating the code (`docker compose up -d --build`); Chrome extensions (`plugins/*/chrome-extension`) are not copied.
+Switched off (or missing) plugins answer `404` and load nothing. Settings are read on every request: after switching a plugin on or off, reload the browser page. Docker copies `plugins/` into the image, so rebuild once after updating the code (`docker compose up -d --build`); Chrome extensions (`plugins/*/chrome-extension`) are not copied.
 
 | Plugin | Purpose |
 |---|---|
@@ -290,6 +302,7 @@ Switched off (or missing) plugins answer `404` and load nothing. `config.json` i
 |---|---|
 | `app.py` | Entry point (starts `watchdock.server.main`) |
 | `watchdock/core.py` | Paths, settings, shared state, JSON storage |
+| `watchdock/db.py` | SQLite storage: projects, settings, runs, log, scheduler results, TYPO3 baselines, pending notifications |
 | `watchdock/alerts.py` | E-mail and Microsoft Teams notifications |
 | `watchdock/gitlab.py` | GitLab API: token, pipelines, manual jobs, project lookup |
 | `watchdock/extensions.py` | Extension update check (Packagist) and changelogs |
@@ -301,11 +314,10 @@ Switched off (or missing) plugins answer `404` and load nothing. `config.json` i
 | `watchdock/plugins.py` | Plugin loader (routes and browser files of enabled plugins) |
 | `static/` | Web UI (`index.html` with the icon sprite, `style.css`, `app.js`, `icons-LICENSE.txt`) |
 | `plugins/` | Optional plugins, off by default (see *Plugins*) |
-| `config.example.json` | Example configuration |
+| `config.example.json` | Example configuration (copy to `config.json` before the first start to import it) |
 | `Dockerfile`, `compose.yaml` | Docker setup |
 | `certs/` | mkcert certificate + key (gitignored) |
-| `config.json` | Your configuration (gitignored) |
-| `state.json` | Runs, log, TYPO3 baselines, scheduler results, pending notifications (gitignored) |
+| `watchdock.db` | SQLite database (stdlib `sqlite3`, mode `600`): projects, settings, runs, log, TYPO3 baselines, scheduler results, pending notifications (gitignored). On first start an existing `config.json` / `state.json` is imported and renamed to `<name>.imported-<time>` (backup) |
 | `.gitlab-token` | GitLab token (gitignored) |
 | `.smtp-password` | SMTP password (gitignored) |
 | `.teams-webhook` | Teams webhook URL (gitignored) |

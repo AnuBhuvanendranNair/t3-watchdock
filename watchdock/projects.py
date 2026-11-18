@@ -1,7 +1,8 @@
 """Create / update project entries in config.json."""
 import re
 
-from .core import CONFIG, STATE, config, load, lock, log, now, save
+from .core import config, lock, log, now, save_config
+from .db import typo3_seen_reset
 from .t3monitor import T3M_ENVS, _t3m_url, t3m_env, _t3m_user, save_t3m_key, t3m_auth_password, t3m_key, t3m_key_file
 
 EXPORT_FORMAT = "t3-watchdock-projects"
@@ -57,14 +58,12 @@ def update_project(b):
                 new = build_project(b, pid)
                 save_t3m_key(pid, b)
                 cfg["projects"][i] = new
-                save(CONFIG, cfg)
+                save_config(cfg)
                 break
         else:
             raise RuntimeError(f"Unknown project: {pid}")
         if old.get("auto_typo3", {}).get("major") != new["auto_typo3"]["major"]:
-            st = load(STATE, {})        # new major -> fresh baseline, no instant trigger
-            st.get("typo3_seen", {}).pop(pid, None)
-            save(STATE, st)
+            typo3_seen_reset([pid])     # new major -> fresh baseline, no instant trigger
     log(f"Project updated: {pid}")
     return new
 
@@ -82,7 +81,7 @@ def update_monitoring(b):
             raise RuntimeError(f"Unknown project: {pid}")
         save_t3m_key(pid, b, [env])
         p[e["cfg"]] = entry
-        save(CONFIG, cfg)
+        save_config(cfg)
     log(f"t3monitor settings updated: {pid} ({env})")
     return p
 
@@ -96,7 +95,7 @@ def add_project(b):
             raise RuntimeError(f"Project already exists: {pid}")
         save_t3m_key(pid, b)
         cfg["projects"].append(project)
-        save(CONFIG, cfg)
+        save_config(cfg)
     log(f"Project added: {pid}")
     return project
 
@@ -196,11 +195,8 @@ def import_projects(data, overwrite=False):
             else:
                 cfg["projects"].append(project)
                 res["added"].append(pid)
-        save(CONFIG, cfg)
+        save_config(cfg)
         if reset:
-            st = load(STATE, {})
-            for pid in reset:
-                st.get("typo3_seen", {}).pop(pid, None)
-            save(STATE, st)
+            typo3_seen_reset(reset)
     log(f"Projects imported: {len(res['added'])} added, {len(res['updated'])} updated, {len(res['skipped'])} skipped")
     return res

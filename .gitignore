@@ -14,3 +14,8 @@ t3monitor/
 *.t3monitor-staging-key
 *.t3monitor-staging-auth
 config.json.bak-*
+watchdock.db
+watchdock.db-wal
+watchdock.db-shm
+state.json.imported-*
+config.json.imported-*

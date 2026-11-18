@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from email.message import EmailMessage
 
-from .core import CONFIG, SMTP_PASSWORD_FILE, TEAMS_FILE, config, lock, log, save, write_secret
+from .core import SMTP_PASSWORD_FILE, TEAMS_FILE, config, lock, log, save_config, write_secret
 
 
 # ---------------------------------------------------------------- email
@@ -37,7 +37,7 @@ def save_email(b):
     with lock:
         cfg = config()
         cfg["email"] = e
-        save(CONFIG, cfg)
+        save_config(cfg)
     pw = b.get("password")
     if b.get("clear_password"):
         SMTP_PASSWORD_FILE.unlink(missing_ok=True)
@@ -90,7 +90,7 @@ def save_teams(b):
     with lock:
         cfg = config()
         cfg["teams"] = {"enabled": enabled}
-        save(CONFIG, cfg)
+        save_config(cfg)
     log("Teams settings saved")
     return teams_cfg()
 
