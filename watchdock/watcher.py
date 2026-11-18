@@ -5,16 +5,15 @@ import threading
 import time
 import urllib.request
 
-from .core import FINAL_STATUSES, MAIL_WATCH_POLL, MAIL_WATCH_TIMEOUT, STATE, TYPO3_API, config, load, lock, log, notify, now, save, stop_event
+from .core import FINAL_STATUSES, MAIL_WATCH_POLL, MAIL_WATCH_TIMEOUT, TYPO3_API, config, log, notify, now, stop_event
 from .alerts import notify_event
+from .db import (kv_set, mail_watch_add, mail_watch_done, mail_watches, typo3_announce, typo3_latest_merge,
+                 typo3_seen, typo3_seen_set)
 from .gitlab import find_project, gitlab, run_pipeline
 
 
 def _mail_watch_done(pipeline_id):
-    with lock:
-        st = load(STATE, {})
-        st["mail_watch"] = [w for w in st.get("mail_watch", []) if w["pipeline"] != pipeline_id]
-        save(STATE, st)
+    mail_watch_done(pipeline_id)
 
 
 def watch_pipeline_mail(w):
@@ -57,15 +56,12 @@ def watch_pipeline_mail(w):
 def start_mail_watch(project, pl, trigger):
     w = {"project": project["id"], "pipeline": pl["id"], "web_url": pl.get("web_url"),
          "trigger": trigger, "t": now()}
-    with lock:
-        st = load(STATE, {})
-        st.setdefault("mail_watch", []).append(w)
-        save(STATE, st)
+    mail_watch_add(w)
     threading.Thread(target=watch_pipeline_mail, args=(w,), daemon=True).start()
 
 
 def resume_mail_watches():
-    for w in load(STATE, {}).get("mail_watch", []):
+    for w in mail_watches():
         threading.Thread(target=watch_pipeline_mail, args=(w,), daemon=True).start()
 
 
@@ -77,13 +73,8 @@ def latest_typo3(major):
 
 def announce_update(due):
     """Before the staging pipelines start: one message per new version (once per project and version)."""
-    with lock:
-        st = load(STATE, {})
-        done = st.setdefault("typo3_announced", {})
-        todo = [(p, prev, v) for p, prev, v in due if done.get(p["id"]) != v]
-        for p, _, v in todo:
-            done[p["id"]] = v
-        save(STATE, st)
+    new = set(typo3_announce([(p["id"], v) for p, _, v in due]))
+    todo = [(p, prev, v) for p, prev, v in due if (p["id"], v) in new]
     for v in sorted({v for _, _, v in todo}):
         items = [(p, prev) for p, prev, vv in todo if vv == v]
         major = v.split(".")[0]
@@ -112,15 +103,10 @@ def check_typo3():
         if major not in latest:
             continue
         v = latest[major]
-        with lock:
-            st = load(STATE, {})
-            prev = st.setdefault("typo3_seen", {}).get(p["id"])
+        prev = typo3_seen().get(p["id"])
         if prev is None:
             # First run: store baseline only, do not trigger.
-            with lock:
-                st = load(STATE, {})
-                st.setdefault("typo3_seen", {})[p["id"]] = v
-                save(STATE, st)
+            typo3_seen_set(p["id"], v)
             log(f"Baseline TYPO3 {v} stored for {p['id']} (no trigger)")
         elif prev != v:
             due.append((p, prev, v))
@@ -131,10 +117,7 @@ def check_typo3():
         try:
             pl = run_pipeline(p, p["auto_typo3"].get("variables", {}), trigger,
                               p["auto_typo3"].get("auto_play", []))
-            with lock:
-                st = load(STATE, {})
-                st["typo3_seen"][p["id"]] = v
-                save(STATE, st)
+            typo3_seen_set(p["id"], v)
             notify("TYPO3 update started", f"{p['name']}: {v} (pipeline #{pl['id']})")
             start_mail_watch(p, pl, trigger)
         except Exception as e:
@@ -148,10 +131,7 @@ def check_typo3():
                          [("Project", f"{p['name']} ({p['path']})"), ("Branch", p["ref"]),
                           ("Trigger", trigger), ("Error", e)])
 
-    with lock:
-        st = load(STATE, {})
-        st["last_check"] = now()
-        # keep the last known version of a major whose check failed (used for the update hint in the UI)
-        st["typo3_latest"] = {**st.get("typo3_latest", {}), **{str(k): v for k, v in latest.items()}}
-        save(STATE, st)
+    kv_set("last_check", now())
+    # keep the last known version of a major whose check failed (used for the update hint in the UI)
+    typo3_latest_merge(latest)
     return projects, errors

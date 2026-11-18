@@ -6,7 +6,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .core import ALLOWED_HOSTS, BASE, CONFIG, HOST, STATE, TLS_CERT, TLS_KEY, TLS_PORT, TOKEN_FILE, config, load, lock, log, now, save, stop_event
+from .core import ALLOWED_HOSTS, BASE, HOST, TLS_CERT, TLS_KEY, TLS_PORT, TOKEN_FILE, config, lock, log, now, save_config, stop_event
+from . import db
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
 from .extensions import ext_changelog, ext_release
 from .gitlab import find_project, gitlab, last_run_status, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, test_token, token_source
@@ -79,7 +80,7 @@ class Handler(BaseHTTPRequestHandler):
                 name, ctype = STATIC[u.path]
                 return self._send(200, (BASE / "static" / name).read_bytes(), ctype)
             if u.path == "/api/state":
-                cfg, st = config(), load(STATE, {})
+                cfg = config()
                 return self._send(200, {
                     "projects": cfg["projects"],
                     "scheduler": sched_view(),
@@ -92,14 +93,13 @@ class Handler(BaseHTTPRequestHandler):
                     "t3monitor_auth": [p["id"] for p in cfg["projects"] if t3m_auth_password(p["id"])],
                     "t3monitor_staging_keys": [p["id"] for p in cfg["projects"] if t3m_key(p["id"], "staging")],
                     "t3monitor_staging_auth": [p["id"] for p in cfg["projects"] if t3m_auth_password(p["id"], "staging")],
-                    "last_check": st.get("last_check"),
-                    "typo3_latest": st.get("typo3_latest", {}),
-                    "typo3_seen": st.get("typo3_seen", {}),
-                    "typo3_security": {k: (st.get("typo3_security") or {}).get(k) for k in ("checked", "items")},
-                    "runs": st.get("runs", [])[:30],
-                    "projects_with_runs": sorted(set(st.get("projects_with_runs", []))
-                                                 | {run["project"] for run in st.get("runs", [])}),
-                    "log": st.get("log", [])[:50]})
+                    "last_check": db.kv_get("last_check"),
+                    "typo3_latest": db.typo3_latest(),
+                    "typo3_seen": db.typo3_seen(),
+                    "typo3_security": {k: (db.kv_get("typo3_security") or {}).get(k) for k in ("checked", "items")},
+                    "runs": db.runs_recent(30),
+                    "projects_with_runs": db.projects_with_runs(),
+                    "log": db.log_recent(50)})
             if u.path == "/api/project-info":
                 return self._send(200, project_info(q["gitlab_url"][0], q["path"][0], q.get("ref", [""])[0]))
             if u.path == "/api/project-avatar":
@@ -245,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
                     if (body.get("confirm") or "").strip() != (proj.get("name") or proj["id"]):
                         raise RuntimeError("Confirmation does not match the project name")
                     cfg["projects"] = [p for p in cfg["projects"] if p["id"] != body["id"]]
-                    save(CONFIG, cfg)
+                    save_config(cfg)
                 for env in T3M_ENVS:
                     t3m_key_file(body["id"], env).unlink(missing_ok=True)
                     t3m_auth_file(body["id"], env).unlink(missing_ok=True)

@@ -9,8 +9,8 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent  # repo root (app.py)
 DATA = Path(os.environ.get("LAUNCHER_DATA", BASE))  # config/state/token location (Docker: /data)
-CONFIG = DATA / "config.json"
-STATE = DATA / "state.json"
+CONFIG = DATA / "config.json"                   # legacy: imported into watchdock.db on first start
+STATE = DATA / "state.json"                     # legacy: imported into watchdock.db on first start
 TOKEN_FILE = DATA / ".gitlab-token"              # stored by the app (chmod 600)
 TOKEN_FALLBACK = Path.home() / ".gitlab-token"     # optional fallback
 SMTP_PASSWORD_FILE = DATA / ".smtp-password"        # stored by the app (chmod 600)
@@ -58,16 +58,21 @@ def now():
 
 
 def config():
-    return load(CONFIG, {"port": 8787, "check_interval_hours": 6, "projects": []})
+    """Projects and settings (from watchdock.db; same shape as the former config.json)."""
+    from .db import load_config             # late import: db imports core
+    return load_config()
+
+
+def save_config(cfg):
+    from .db import save_config as _save
+    _save(cfg)
 
 
 def log(msg):
-    print(f"[{now()}] {msg}", flush=True)
-    with lock:
-        st = load(STATE, {})
-        st.setdefault("log", []).insert(0, {"t": now(), "msg": msg})
-        del st["log"][200:]
-        save(STATE, st)
+    t = now()
+    print(f"[{t}] {msg}", flush=True)
+    from .db import log_add                 # late import: db imports core
+    log_add(t, msg)
 
 
 def notify(title, msg):

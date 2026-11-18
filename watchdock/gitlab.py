@@ -9,7 +9,8 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from .core import FINAL_STATUSES, STATE, TOKEN_FALLBACK, TOKEN_FILE, config, load, lock, log, now, save, stop_event
+from .core import FINAL_STATUSES, TOKEN_FALLBACK, TOKEN_FILE, config, log, now, stop_event
+from .db import last_pipelines, run_add
 
 
 # ---------------------------------------------------------------- GitLab
@@ -115,15 +116,8 @@ def run_pipeline(project, variables, trigger, play_jobs=(), ref=None):
     body = {"ref": ref,
             "variables": [{"key": k, "value": str(v)} for k, v in variables.items()]}
     p = gitlab(project, "POST", "/pipeline", body)
-    with lock:
-        st = load(STATE, {})
-        st.setdefault("runs", []).insert(0, {
-            "t": now(), "project": project["id"], "pipeline": p["id"],
-            "web_url": p.get("web_url"), "trigger": trigger, "ref": ref})
-        st["projects_with_runs"] = sorted(set(st.get("projects_with_runs", []))
-                                          | {run["project"] for run in st["runs"]})
-        del st["runs"][100:]
-        save(STATE, st)
+    run_add({"t": now(), "project": project["id"], "pipeline": p["id"],
+             "web_url": p.get("web_url"), "trigger": trigger, "ref": ref})
     log(f"Pipeline #{p['id']} started: {project['path']} @ {ref} ({trigger})")
     if play_jobs:
         threading.Thread(target=auto_play, args=(project, p["id"], list(play_jobs)), daemon=True).start()
@@ -241,10 +235,7 @@ def _run_status(project, pipeline_id):
 def last_run_status():
     """{project id: {pipeline, status, started, finished, job?, job_status?, error?}} for the last run of each project."""
     projects = {p["id"]: p for p in config()["projects"] if p.get("ci", True) is not False}
-    last = {}
-    for r in load(STATE, {}).get("runs", []):
-        if r.get("project") in projects and r["project"] not in last:
-            last[r["project"]] = int(r["pipeline"])
+    last = {pid: int(pl) for pid, pl in last_pipelines().items() if pid in projects}
     for k in [k for k in _run_cache if (k[0], k[1]) not in last.items()]:
         _run_cache.pop(k, None)                         # forget older runs
     if not last:
