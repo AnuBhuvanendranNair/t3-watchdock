@@ -10,6 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 COPY app.py ./
+COPY bin/ bin/
 COPY watchdock/ watchdock/
 COPY static/ static/
 COPY plugins/ plugins/

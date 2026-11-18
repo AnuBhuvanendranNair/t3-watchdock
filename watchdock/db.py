@@ -35,6 +35,13 @@ SCHEMA = [
     CREATE TABLE projects (id TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL);
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     """,
+    # version 3: login (users managed on the command line, sessions store only a hash of the cookie token)
+    """
+    CREATE TABLE users (name TEXT PRIMARY KEY, hash TEXT NOT NULL, created TEXT NOT NULL);
+    CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user TEXT NOT NULL REFERENCES users (name) ON DELETE CASCADE,
+        expires INTEGER NOT NULL);
+    CREATE INDEX sessions_user ON sessions (user);
+    """,
 ]
 CONFIG_DEFAULTS = {"port": 8787, "check_interval_hours": 6}
 
@@ -86,8 +93,8 @@ def _migrate(c):
             # statement by statement: executescript() would COMMIT the open transaction
             for stmt in filter(str.strip, SCHEMA[i].split(";")):
                 c.execute(stmt)
-            fn, path = imports[i]
-            if path.exists():
+            fn, path = imports.get(i, (None, None))
+            if path and path.exists():
                 fn(c, json.loads(path.read_text(encoding="utf-8")))
                 imported.append(path)
             c.execute(f"PRAGMA user_version = {i + 1}")
@@ -271,3 +278,50 @@ def mail_watch_done(pipeline):
 
 def mail_watches():
     return _rows("SELECT project, pipeline, web_url, trigger, t FROM mail_watch ORDER BY t")
+
+
+# ---------------------------------------------------------------- users and sessions (login, see auth.py)
+def user_get(name):
+    r = _rows("SELECT name, hash FROM users WHERE name = ?", (name,))
+    return r[0] if r else None
+
+
+def users():
+    return _rows("SELECT name, created FROM users ORDER BY name")
+
+
+def user_add(name, pw_hash):
+    with tx() as c:
+        c.execute("INSERT INTO users (name, hash, created) VALUES (?, ?, ?)",
+                  (name, pw_hash, datetime.datetime.now().isoformat(timespec="seconds")))
+
+
+def user_set_hash(name, pw_hash):
+    with tx() as c:
+        return c.execute("UPDATE users SET hash = ? WHERE name = ?", (pw_hash, name)).rowcount > 0
+
+
+def user_delete(name):
+    with tx() as c:
+        return c.execute("DELETE FROM users WHERE name = ?", (name,)).rowcount > 0
+
+
+def session_add(token_hash, user, expires):
+    with tx() as c:
+        c.execute("DELETE FROM sessions WHERE expires < strftime('%s', 'now')")
+        c.execute("INSERT INTO sessions (token_hash, user, expires) VALUES (?, ?, ?)", (token_hash, user, expires))
+
+
+def session_user(token_hash, now_ts):
+    r = _rows("SELECT user FROM sessions WHERE token_hash = ? AND expires > ?", (token_hash, now_ts))
+    return r[0]["user"] if r else None
+
+
+def session_delete(token_hash):
+    with tx() as c:
+        c.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+
+
+def sessions_delete_user(user):
+    with tx() as c:
+        c.execute("DELETE FROM sessions WHERE user = ?", (user,))

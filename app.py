@@ -13,6 +13,9 @@ Settings without a UI (e.g. plugins, port) are changed on the command line:
     python3 app.py config get [KEY]
     python3 app.py config set KEY JSON      e.g.  config set plugins '{"gingco_patchday": {}}'
     python3 app.py config unset KEY
+
+Login accounts (also as bin/t3-watchdock …):
+    python3 app.py add-user NAME | set-password NAME | remove-user NAME | list-users
 """
 import json
 import sys
@@ -45,9 +48,41 @@ def config_cli(args):
     print(f"{rest[0]} {'saved' if cmd == 'set' else 'removed'}")
 
 
+USER_CMDS = ("add-user", "set-password", "remove-user", "list-users")
+
+
+def user_cli(cmd, args):
+    import getpass
+    from watchdock import auth, db
+    if cmd == "list-users":
+        for u in db.users():
+            print(f"{u['name']}\t{u['created']}")
+        return
+    if len(args) != 1:
+        sys.exit(f"usage: {cmd} NAME")
+    name = args[0]
+    try:
+        if cmd == "remove-user":
+            auth.remove_user(name)
+            print(f"User removed: {name}")
+            return
+        if cmd == "add-user":
+            auth.check_name(name)
+        pw = getpass.getpass(f"Password for {name}: ")
+        auth.check_password(pw)
+        if getpass.getpass("Repeat password: ") != pw:
+            sys.exit("Passwords do not match")
+        (auth.add_user if cmd == "add-user" else auth.set_password)(name, pw)
+    except ValueError as e:
+        sys.exit(str(e))
+    print(f"{'User added' if cmd == 'add-user' else 'Password changed (all sessions signed out)'}: {name}")
+
+
 if __name__ == "__main__":
     if sys.argv[1:2] == ["config"]:
         config_cli(sys.argv[2:])
+    elif sys.argv[1:2] and sys.argv[1] in USER_CMDS:
+        user_cli(sys.argv[1], sys.argv[2:])
     else:
         from watchdock.server import main
         main()
