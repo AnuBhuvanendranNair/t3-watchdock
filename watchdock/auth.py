@@ -11,13 +11,17 @@ import threading
 import time
 
 from . import db
+from .core import log
 
 SESSION_HOURS = 12                      # absolute session lifetime
 COOKIE = "wd_session"
 SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1}
 NAME_RE = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
 MIN_PASSWORD = 12
-FAIL_MAX, FAIL_WINDOW = 5, 15 * 60      # failed logins per client address and window (seconds)
+LOCK_AFTER = 3                          # failed logins in a row -> account locked until unlock-user (CLI)
+FAIL_MAX, FAIL_WINDOW = 5, 15 * 60      # failed logins per client address and window (seconds), any name
+LOCKED_MSG = (f"Account locked after {LOCK_AFTER} failed logins. "
+              "An admin must unlock it on the command line (t3-watchdock unlock-user NAME).")
 
 _fails = {}
 _fails_lock = threading.Lock()
@@ -62,7 +66,45 @@ def set_password(name, password):
     check_password(password)
     if not db.user_set_hash(name, hash_password(password)):
         raise ValueError(f"No such user: {name}")
+    db.user_reset_failed(name)           # a new password also unlocks the account
     db.sessions_delete_user(name)        # sign out everywhere
+
+
+def change_password(name, current, new, keep_token):
+    """Own password change from the browser: current password required; other sessions end, this one stays."""
+    u = db.user_get(name)
+    if not u or u["locked"]:
+        raise PermissionError(LOCKED_MSG)
+    if not _check(u["hash"], current or ""):
+        if db.user_fail(name, LOCK_AFTER):
+            db.sessions_delete_user(name)
+            log(f"Account locked after {LOCK_AFTER} failed logins: {name}")
+            raise PermissionError(LOCKED_MSG)
+        raise PermissionError("Current password is wrong")
+    check_password(new or "")
+    db.user_set_hash(name, hash_password(new))
+    db.user_reset_failed(name)
+    db.sessions_delete_user(name, keep=_digest(keep_token))
+    log(f"Password changed in the browser: {name}")
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def update_profile(name, full_name, email):
+    full_name, email = (full_name or "").strip(), (email or "").strip()
+    if len(full_name) > 100:
+        raise ValueError("Full name: at most 100 characters")
+    if email and (len(email) > 254 or not EMAIL_RE.match(email)):
+        raise ValueError("Email address is not valid")
+    db.user_profile_set(name, full_name, email)
+    return db.user_profile(name)
+
+
+def unlock_user(name):
+    if not db.user_reset_failed(name):
+        raise ValueError(f"No such user: {name}")
+    log(f"Account unlocked on the command line: {name}")
 
 
 def remove_user(name):
@@ -88,11 +130,19 @@ def login(name, password, addr):
     if _limited(addr):
         raise PermissionError("Too many failed logins, try again later")
     u = db.user_get(name or "")
+    if u and u["locked"]:
+        raise PermissionError(LOCKED_MSG)
     if not _check(u["hash"] if u else _DUMMY, password or "") or not u:
         _fail(addr)
+        if u and db.user_fail(u["name"], LOCK_AFTER):
+            db.sessions_delete_user(u["name"])           # locked = signed out everywhere
+            log(f"Account locked after {LOCK_AFTER} failed logins: {u['name']}")
+            raise PermissionError(LOCKED_MSG)
         raise PermissionError("Wrong name or password")
     with _fails_lock:
         _fails.pop(addr, None)
+    if u["failed"]:
+        db.user_reset_failed(u["name"])
     token = secrets.token_urlsafe(32)
     db.session_add(_digest(token), u["name"], int(time.time()) + SESSION_HOURS * 3600)
     return token, SESSION_HOURS * 3600

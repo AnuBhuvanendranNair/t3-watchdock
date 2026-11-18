@@ -1,5 +1,7 @@
 *
 !app.py
+!gunicorn.conf.py
+!requirements.txt
 !bin/
 !watchdock/
 !static/

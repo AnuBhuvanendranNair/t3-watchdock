@@ -1,0 +1,44 @@
+# Traefik dynamic configuration (file provider, no Docker socket).
+# Routes to the app container "launcher" on the internal network; the app port is not published.
+http:
+  routers:
+    https:
+      entryPoints: [websecure]
+      rule: Host(`local-gitlabrunner.local`)
+      tls: {}
+      service: launcher
+      middlewares: [ratelimit, bodylimit, headers]
+    to-https:                                   # http://local-gitlabrunner.local -> https
+      entryPoints: [web]
+      rule: Host(`local-gitlabrunner.local`)
+      service: launcher
+      middlewares: [to-https]
+    local:                                      # http://127.0.0.1:8787 / http://localhost:8787 (plain, loopback only)
+      entryPoints: [local]
+      rule: Host(`127.0.0.1`) || Host(`localhost`)
+      service: launcher
+      middlewares: [ratelimit, bodylimit, headers]
+
+  middlewares:
+    to-https:
+      redirectScheme: {scheme: https, permanent: true}
+    ratelimit:                                  # per client address
+      rateLimit: {average: 50, period: 1s, burst: 100}
+    bodylimit:                                  # largest expected request: project import (JSON)
+      buffering: {maxRequestBodyBytes: 10485760}
+    headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        referrerPolicy: same-origin
+
+  services:
+    launcher:
+      loadBalancer:
+        servers:
+          - url: http://launcher:8787
+
+tls:
+  certificates:                                 # mkcert certificate, see README "Local hostname with HTTPS"
+    - certFile: /certs/local-gitlabrunner.local.pem
+      keyFile: /certs/local-gitlabrunner.local-key.pem

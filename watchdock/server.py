@@ -1,13 +1,16 @@
-"""HTTP server and request handler."""
-import http.cookies
+"""Web app (Flask, served by Gunicorn: one worker, several threads; see gunicorn.conf.py)."""
+import functools
 import json
-import ssl
+import os
+import sys
 import threading
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
-from .core import ALLOWED_HOSTS, BASE, HOST, TLS_CERT, TLS_KEY, TLS_PORT, TOKEN_FILE, config, lock, log, now, save_config, stop_event
+from flask import Flask, Response, g, redirect, request
+from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+from .core import ALLOWED_HOSTS, BASE, BEHIND_PROXY, TOKEN_FILE, config, lock, log, now, save_config, stop_event
 from . import auth, db
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
 from .extensions import ext_changelog, ext_release
@@ -20,313 +23,460 @@ from .plugins import NotFound, asset as plugin_asset, assets as plugin_assets, c
 from .scheduler import TASKS, save_sched, sched_run, sched_view, scheduler
 
 
-tls_on = False  # set in main() once the HTTPS listener runs
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"),        # fixed allowlist, no path traversal
           "/style.css": ("style.css", "text/css; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
           "/login": ("login.html", "text/html; charset=utf-8")}
-PUBLIC_GET = {"/login", "/style.css"}      # reachable without a session
+PUBLIC = {("GET", "/login"), ("GET", "/style.css"), ("POST", "/api/login")}     # reachable without a session
+MAX_BODY = 10 * 1024 * 1024
+
+app = Flask(__name__, static_folder=None)
+app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
+if BEHIND_PROXY:        # scheme and client address from the last X-Forwarded-Proto / -For entry (set by Traefik)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 
-# ---------------------------------------------------------------- HTTP
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
+# ---------------------------------------------------------------- background work (once per process)
+_started = False
+_start_lock = threading.Lock()
 
-    def _allowed(self):
-        port = self.server.server_address[1]
-        ok = {f"127.0.0.1:{port}", f"localhost:{port}"} | ALLOWED_HOSTS
-        if self.headers.get("Host") not in ok:          # DNS rebinding
-            return False
-        origin = self.headers.get("Origin")
-        if origin and origin.split("://", 1)[-1] not in ok:  # cross-site requests
-            return False
-        return True
 
-    def _to_https(self):
-        """Plain HTTP on an extra hostname -> redirect to HTTPS (127.0.0.1/localhost stay plain)."""
-        host = self.headers.get("Host", "")
-        if not tls_on or isinstance(self.connection, ssl.SSLSocket) or host not in ALLOWED_HOSTS:
-            return False
-        self.send_response(301 if self.command == "GET" else 308)
-        self.send_header("Location", f"https://{host.split(':')[0]}{self.path}")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-        return True
-
-    def _secret_ok(self):
-        """Secrets leave the app only on a same-origin HTTPS or localhost request."""
-        host = self.headers.get("Host", "")
-        secure = isinstance(self.connection, ssl.SSLSocket)
-        loopback = host.split(":", 1)[0] in {"127.0.0.1", "localhost"}
-        origin = ("https://" if secure else "http://") + host
-        return (secure or loopback) and self.headers.get("Origin") == origin
-
-    def _token(self):
-        c = http.cookies.SimpleCookie()
-        try:
-            c.load(self.headers.get("Cookie", ""))
-        except http.cookies.CookieError:
-            return None
-        return c[auth.COOKIE].value if auth.COOKIE in c else None
-
-    def _auth(self):
-        """Signed-in user name, or None after sending 401 / a redirect to the login page."""
-        self.user = auth.session_user(self._token())
-        if self.user:
-            return self.user
-        if self.command == "GET" and not self.path.startswith(("/api/", "/plugins/")):
-            self.send_response(302)
-            self.send_header("Location", "/login")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-        else:
-            self._send(401, {"error": "login required"})
-        return None
-
-    def _cookie(self, value, max_age):
-        secure = "; Secure" if isinstance(self.connection, ssl.SSLSocket) else ""
-        return f"{auth.COOKIE}={value}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Strict{secure}"
-
-    def _send(self, code, data, ctype="application/json", cookie=None):
-        body = data if isinstance(data, bytes) else json.dumps(data).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        if not self._allowed():
-            return self._send(403, {"error": "forbidden"})
-        if self._to_https():
+def start_background():
+    """Scheduler and pending mail watches. Gunicorn must run exactly one worker, or they run twice."""
+    global _started
+    with _start_lock:
+        if _started:
             return
-        u = urllib.parse.urlparse(self.path)
-        q = urllib.parse.parse_qs(u.query)
-        if u.path not in PUBLIC_GET and not self._auth():
-            return
-        try:
-            if u.path in STATIC:
-                name, ctype = STATIC[u.path]
-                return self._send(200, (BASE / "static" / name).read_bytes(), ctype)
-            if u.path == "/api/state":
-                cfg = config()
-                return self._send(200, {
-                    "user": self.user,
-                    "projects": cfg["projects"],
-                    "scheduler": sched_view(),
-                    "token_source": token_source()[0],
-                    "email": email_cfg(),
-                    "email_password_set": bool(smtp_password()),
-                    "teams": teams_cfg(),
-                    "teams_url_set": bool(teams_url()),
-                    "t3monitor_keys": [p["id"] for p in cfg["projects"] if t3m_key(p["id"])],
-                    "t3monitor_auth": [p["id"] for p in cfg["projects"] if t3m_auth_password(p["id"])],
-                    "t3monitor_staging_keys": [p["id"] for p in cfg["projects"] if t3m_key(p["id"], "staging")],
-                    "t3monitor_staging_auth": [p["id"] for p in cfg["projects"] if t3m_auth_password(p["id"], "staging")],
-                    "last_check": db.kv_get("last_check"),
-                    "typo3_latest": db.typo3_latest(),
-                    "typo3_seen": db.typo3_seen(),
-                    "typo3_security": {k: (db.kv_get("typo3_security") or {}).get(k) for k in ("checked", "items")},
-                    "runs": db.runs_recent(30),
-                    "projects_with_runs": db.projects_with_runs(),
-                    "log": db.log_recent(50)})
-            if u.path == "/api/project-info":
-                return self._send(200, project_info(q["gitlab_url"][0], q["path"][0], q.get("ref", [""])[0]))
-            if u.path == "/api/project-avatar":
-                p = find_project(q["project"][0])
-                return self._send(200, {"url": gitlab(p, "GET", "").get("avatar_url")})
-            if u.path == "/api/ext/changelog":
-                return self._send(200, ext_changelog(q["composer"][0], q["version"][0], q.get("installed", [""])[0]))
-            if u.path == "/api/ext/release":
-                return self._send(200, ext_release(q["composer"][0], q["version"][0], q.get("summary", ["1"])[0] != "0"))
-            if u.path == "/api/t3monitor/summary":
-                return self._send(200, t3m_summary())
-            if u.path == "/api/t3monitor":
-                return self._send(200, t3m_view(find_project(q["project"][0])["id"], q.get("env", ["production"])[0]))
-            if u.path == "/api/search":
-                return self._send(200, search_projects(q["gitlab_url"][0], q["q"][0]))
-            if u.path == "/api/runs/status":
-                return self._send(200, last_run_status())
-            if u.path == "/api/plugins":
-                return self._send(200, plugin_assets())
-            if u.path == "/api/plugin-admin":                 # Plugins page: installed plugins (on and off)
-                return self._send(200, plugin_catalog())
-            if u.path.startswith("/plugins/"):              # /plugins/<name>/<file>: browser files of a plugin
-                parts = u.path.split("/")
-                if len(parts) != 4:
-                    raise NotFound("not found")
-                return self._send(200, *plugin_asset(parts[2], parts[3]))
-            if u.path.startswith("/api/plugins/"):          # /api/plugins/<name>/<route>
-                parts = u.path.split("/")
-                if len(parts) != 5:
-                    raise NotFound("not found")
-                return self._send(200, plugin_call("GET", parts[3], parts[4], q))
-            if u.path == "/api/pipeline":
-                p = find_project(q["project"][0])
-                pid = int(q["id"][0])
-                return self._send(200, {
-                    "pipeline": gitlab(p, "GET", f"/pipelines/{pid}"),
-                    "jobs": gitlab(p, "GET", f"/pipelines/{pid}/jobs?per_page=100")})
-            return self._send(404, {"error": "not found"})
-        except NotFound as e:
-            return self._send(404, {"error": str(e)})
-        except Exception as e:
-            return self._send(500, {"error": str(e)})
-
-    def do_POST(self):
-        if not self._allowed() or not self.headers.get("Content-Type", "").startswith("application/json"):
-            return self._send(403, {"error": "forbidden"})
-        if self._to_https():
-            return
-        try:
-            n = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(n) or b"{}")
-            path = self.path
-            if path == "/api/login":
-                try:
-                    token, age = auth.login(body.get("name"), body.get("password"), self.client_address[0])
-                except PermissionError as e:
-                    return self._send(401, {"error": str(e)})
-                log(f"Login: {body.get('name')}")
-                return self._send(200, {"ok": True}, cookie=self._cookie(token, age))
-            if not self._auth():
-                return
-            if path == "/api/logout":
-                auth.logout(self._token())
-                log(f"Logout: {self.user}")
-                return self._send(200, {"ok": True}, cookie=self._cookie("", 0))
-            if path == "/api/run":
-                p = find_project(body["project"])
-                if body.get("mode") == "promote":
-                    return self._send(200, promote(p, int(body["from"])))
-                if body.get("mode") == "production":
-                    return self._send(200, run_production(p))
-                src = p.get("auto_typo3", {}) if body.get("mode") == "update" else p
-                trig = "manual TYPO3 update" if body.get("mode") == "update" else "manual"
-                return self._send(200, run_pipeline(p, src.get("variables", {}), trig,
-                                                    src.get("auto_play", [])))
-            if path == "/api/updates/send":
-                return self._send(200, {"msg": send_now(find_project(body["project"]))})
-            if path == "/api/play":
-                p = find_project(body["project"])
-                require_ci(p)
-                r = gitlab(p, "POST", f"/jobs/{int(body['job'])}/play")
-                log(f"Manual job '{r.get('name')}' started in {p['id']}")
-                return self._send(200, r)
-            if path == "/api/token":
-                save_token(body.get("token"))
-                return self._send(200, {"msg": test_token()})
-            if path == "/api/token/test":
-                return self._send(200, {"msg": test_token()})
-            if path == "/api/token/delete":
-                TOKEN_FILE.unlink(missing_ok=True)
-                log("GitLab token removed from app folder")
-                return self._send(200, {"ok": True})
-            if path == "/api/t3monitor/reveal-key":
-                if not self._secret_ok():
-                    return self._send(403, {"error": "Reveal requires a same-origin HTTPS or localhost request"})
-                p = find_project(body["project"])
-                key = t3m_key(p["id"], body["env"])
-                if not key:
-                    return self._send(404, {"error": "No saved key for this environment"})
-                return self._send(200, {"key": key})
-            if path == "/api/t3monitor/refresh":
-                p, env = find_project(body["project"]), body.get("env") or "production"
-                t3m_env(env)
-                try:
-                    t3m_fetch(p, env)
-                except RuntimeError:
-                    pass                                   # shown via last_error
-                return self._send(200, t3m_view(p["id"], env))
-            if path == "/api/teams":
-                return self._send(200, save_teams(body))
-            if path == "/api/teams/test":
-                code = send_teams("T3 Watchdock: test message", "Teams notifications of T3 Watchdock work.",
-                                  [("Sent", now().replace("T", " "))])
-                msg = (f"Teams test message accepted by the webhook (HTTP {code}). If it does not appear in the "
-                       "channel, check the run history of the Workflow in Teams (Workflows → the flow → Run history).")
-                log(msg)
-                return self._send(200, {"msg": msg})
-            if path == "/api/email":
-                return self._send(200, save_email(body))
-            if path == "/api/email/test":
-                e = email_cfg()
-                send_mail("[T3 Watchdock] Test email", "Email notifications of T3 Watchdock work.\n", e)
-                log(f"Test email sent to {', '.join(e['to'])}")
-                return self._send(200, {"msg": f"Test email sent to {', '.join(e['to'])}"})
-            if path == "/api/check-now":
-                ok, result = sched_run("typo3_release")
-                return self._send(200 if ok else 500, {"ok": True} if ok else {"error": result})
-            if path == "/api/scheduler":
-                return self._send(200, save_sched(body))
-            if path == "/api/scheduler/run":
-                if body.get("id") not in TASKS:
-                    raise RuntimeError("Unknown task")
-                ok, result = sched_run(body["id"])
-                return self._send(200, {"ok": ok, "result": result, "scheduler": sched_view()})
-            if path == "/api/projects":
-                return self._send(200, add_project(body))
-            if path == "/api/t3monitor/settings":
-                return self._send(200, update_monitoring(body))
-            if path == "/api/projects/update":
-                return self._send(200, update_project(body))
-            if path == "/api/projects/export":
-                if not self._secret_ok():
-                    return self._send(403, {"error": "Export requires a same-origin HTTPS or localhost request"})
-                return self._send(200, export_projects())
-            if path == "/api/projects/import":
-                return self._send(200, import_projects(body.get("data"), bool(body.get("overwrite"))))
-            if path == "/api/plugin-admin":
-                return self._send(200, save_plugin(body))
-            if path.startswith("/api/plugins/"):
-                parts = path.split("?")[0].split("/")
-                if len(parts) != 5:
-                    raise NotFound("not found")
-                return self._send(200, plugin_call("POST", parts[3], parts[4], body))
-            if path == "/api/projects/delete":
-                with lock:
-                    cfg = config()
-                    proj = next((p for p in cfg["projects"] if p["id"] == body.get("id")), None)
-                    if not proj:
-                        raise RuntimeError("Project not found")
-                    if (body.get("confirm") or "").strip() != (proj.get("name") or proj["id"]):
-                        raise RuntimeError("Confirmation does not match the project name")
-                    cfg["projects"] = [p for p in cfg["projects"] if p["id"] != body["id"]]
-                    save_config(cfg)
-                for env in T3M_ENVS:
-                    t3m_key_file(body["id"], env).unlink(missing_ok=True)
-                    t3m_auth_file(body["id"], env).unlink(missing_ok=True)
-                log(f"Project removed: {body['id']}")
-                return self._send(200, {"ok": True})
-            return self._send(404, {"error": "not found"})
-        except NotFound as e:
-            return self._send(404, {"error": str(e)})
-        except Exception as e:
-            return self._send(500, {"error": str(e)})
-
-
-def main():
-    port = int(config().get("port", 8787))
-    srv = ThreadingHTTPServer((HOST, port), Handler)
+        _started = True
     resume_mail_watches()
     threading.Thread(target=scheduler, daemon=True).start()
-    print(f"T3 Watchdock: http://{HOST}:{port}", flush=True)
-    if TLS_CERT and TLS_KEY and not (Path(TLS_CERT).exists() and Path(TLS_KEY).exists()):
-        print(f"HTTPS disabled: certificate not found ({TLS_CERT})", flush=True)
-    elif TLS_CERT and TLS_KEY:
-        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ctx.load_cert_chain(TLS_CERT, TLS_KEY)
-        tls = ThreadingHTTPServer((HOST, TLS_PORT), Handler)
-        tls.socket = ctx.wrap_socket(tls.socket, server_side=True)
-        threading.Thread(target=tls.serve_forever, daemon=True).start()
-        global tls_on
-        tls_on = True
-        print(f"T3 Watchdock: https://{HOST}:{TLS_PORT}", flush=True)
+
+
+# ---------------------------------------------------------------- helpers
+def send(code, data, ctype="application/json", cookie=None):
+    body = data if isinstance(data, bytes) else json.dumps(data).encode()
+    r = Response(body, status=code, content_type=ctype)
+    if cookie:
+        r.headers["Set-Cookie"] = cookie
+    return r
+
+
+def ok(data):
+    return send(200, data)
+
+
+def query():
+    """Query string as {key: [values]} like urllib.parse.parse_qs (empty values dropped), as plugins expect."""
+    return urllib.parse.parse_qs(request.query_string.decode())
+
+
+def q1(key, default=None):
+    """First value of a query parameter; missing and no default -> KeyError (answered with 500, as before)."""
+    q = query()
+    if key in q:
+        return q[key][0]
+    if default is None:
+        raise KeyError(key)
+    return default
+
+
+def body():
+    return json.loads(request.get_data() or b"{}")
+
+
+@functools.cache
+def _port():
+    return int(config().get("port", 8787))
+
+
+def _allowed():
+    port = _port()
+    hosts = {f"127.0.0.1:{port}", f"localhost:{port}"} | ALLOWED_HOSTS
+    if request.headers.get("Host") not in hosts:                     # DNS rebinding
+        return False
+    origin = request.headers.get("Origin")
+    if origin and origin.split("://", 1)[-1] not in hosts:           # cross-site requests
+        return False
+    return True
+
+
+def _secret_ok():
+    """Secrets leave the app only on a same-origin HTTPS or localhost request."""
+    host = request.headers.get("Host", "")
+    secure = request.scheme == "https"
+    loopback = host.split(":", 1)[0] in {"127.0.0.1", "localhost"}
+    return (secure or loopback) and request.headers.get("Origin") == ("https://" if secure else "http://") + host
+
+
+def _cookie(value, max_age):
+    secure = "; Secure" if request.scheme == "https" else ""
+    return f"{auth.COOKIE}={value}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Strict{secure}"
+
+
+@app.before_request
+def guard():
+    if not _allowed():
+        return send(403, {"error": "forbidden"})
+    if request.method == "POST" and not request.headers.get("Content-Type", "").startswith("application/json"):
+        return send(403, {"error": "forbidden"})
+    g.user = auth.session_user(request.cookies.get(auth.COOKIE))
+    if g.user or (request.method, request.path) in PUBLIC:
+        return None
+    if request.method == "GET" and not request.path.startswith(("/api/", "/plugins/")):
+        return redirect("/login", 302)
+    return send(401, {"error": "login required"})
+
+
+@app.after_request
+def no_store(r):
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+
+@app.errorhandler(Exception)
+def error(e):
+    if isinstance(e, NotFound):
+        return send(404, {"error": str(e)})
+    if isinstance(e, HTTPException):
+        msg = {404: "not found", 405: "not found", 413: "request too large"}.get(e.code, e.name)
+        return send(404 if e.code == 405 else e.code, {"error": msg})
+    return send(500, {"error": str(e)})
+
+
+# ---------------------------------------------------------------- GET
+@app.get("/")
+@app.get("/style.css")
+@app.get("/app.js")
+@app.get("/login")
+def static_file():
+    name, ctype = STATIC[request.path]
+    return send(200, (BASE / "static" / name).read_bytes(), ctype)
+
+
+@app.get("/api/state")
+def state():
+    cfg = config()
+    return ok({
+        "user": g.user,
+        "projects": cfg["projects"],
+        "scheduler": sched_view(),
+        "token_source": token_source()[0],
+        "email": email_cfg(),
+        "email_password_set": bool(smtp_password()),
+        "teams": teams_cfg(),
+        "teams_url_set": bool(teams_url()),
+        "t3monitor_keys": [p["id"] for p in cfg["projects"] if t3m_key(p["id"])],
+        "t3monitor_auth": [p["id"] for p in cfg["projects"] if t3m_auth_password(p["id"])],
+        "t3monitor_staging_keys": [p["id"] for p in cfg["projects"] if t3m_key(p["id"], "staging")],
+        "t3monitor_staging_auth": [p["id"] for p in cfg["projects"] if t3m_auth_password(p["id"], "staging")],
+        "last_check": db.kv_get("last_check"),
+        "typo3_latest": db.typo3_latest(),
+        "typo3_seen": db.typo3_seen(),
+        "typo3_security": {k: (db.kv_get("typo3_security") or {}).get(k) for k in ("checked", "items")},
+        "runs": db.runs_recent(30),
+        "projects_with_runs": db.projects_with_runs(),
+        "log": db.log_recent(50)})
+
+
+@app.get("/api/project-info")
+def get_project_info():
+    return ok(project_info(q1("gitlab_url"), q1("path"), q1("ref", "")))
+
+
+@app.get("/api/project-avatar")
+def project_avatar():
+    return ok({"url": gitlab(find_project(q1("project")), "GET", "").get("avatar_url")})
+
+
+@app.get("/api/ext/changelog")
+def get_ext_changelog():
+    return ok(ext_changelog(q1("composer"), q1("version"), q1("installed", "")))
+
+
+@app.get("/api/ext/release")
+def get_ext_release():
+    return ok(ext_release(q1("composer"), q1("version"), q1("summary", "1") != "0"))
+
+
+@app.get("/api/t3monitor/summary")
+def t3monitor_summary():
+    return ok(t3m_summary())
+
+
+@app.get("/api/t3monitor")
+def t3monitor():
+    return ok(t3m_view(find_project(q1("project"))["id"], q1("env", "production")))
+
+
+@app.get("/api/search")
+def search():
+    return ok(search_projects(q1("gitlab_url"), q1("q")))
+
+
+@app.get("/api/runs/status")
+def runs_status():
+    return ok(last_run_status())
+
+
+@app.get("/api/plugins")
+def plugins():
+    return ok(plugin_assets())
+
+
+@app.get("/api/plugin-admin")                        # Plugins page: installed plugins (on and off)
+def plugin_admin():
+    return ok(plugin_catalog())
+
+
+@app.get("/plugins/<name>/<file>")                   # browser files of a plugin
+def plugin_file(name, file):
+    return send(200, *plugin_asset(name, file))
+
+
+@app.get("/api/plugins/<name>/<route>")
+def plugin_get(name, route):
+    return ok(plugin_call("GET", name, route, query()))
+
+
+@app.get("/api/pipeline")
+def pipeline():
+    p, pid = find_project(q1("project")), int(q1("id"))
+    return ok({"pipeline": gitlab(p, "GET", f"/pipelines/{pid}"),
+               "jobs": gitlab(p, "GET", f"/pipelines/{pid}/jobs?per_page=100")})
+
+
+# ---------------------------------------------------------------- POST
+@app.post("/api/login")
+def login():
+    b = body()
     try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        stop_event.set()
+        token, age = auth.login(b.get("name"), b.get("password"), request.remote_addr)
+    except PermissionError as e:
+        return send(401, {"error": str(e)})
+    log(f"Login: {b.get('name')}")
+    return send(200, {"ok": True}, cookie=_cookie(token, age))
+
+
+@app.post("/api/logout")
+def logout():
+    auth.logout(request.cookies.get(auth.COOKIE))
+    log(f"Logout: {g.user}")
+    return send(200, {"ok": True}, cookie=_cookie("", 0))
+
+
+@app.get("/api/profile")
+def profile():
+    return ok(db.user_profile(g.user))
+
+
+@app.post("/api/profile")
+def profile_save():
+    b = body()
+    try:
+        return ok(auth.update_profile(g.user, b.get("full_name"), b.get("email")))
+    except ValueError as e:
+        return send(400, {"error": str(e)})
+
+
+@app.post("/api/profile/password")
+def profile_password():
+    b = body()
+    try:
+        auth.change_password(g.user, b.get("current"), b.get("new"), request.cookies.get(auth.COOKIE))
+    except PermissionError as e:
+        return send(403, {"error": str(e)})
+    except ValueError as e:
+        return send(400, {"error": str(e)})
+    return ok({"ok": True})
+
+
+@app.post("/api/run")
+def run():
+    b = body()
+    p = find_project(b["project"])
+    if b.get("mode") == "promote":
+        return ok(promote(p, int(b["from"])))
+    if b.get("mode") == "production":
+        return ok(run_production(p))
+    src = p.get("auto_typo3", {}) if b.get("mode") == "update" else p
+    trig = "manual TYPO3 update" if b.get("mode") == "update" else "manual"
+    return ok(run_pipeline(p, src.get("variables", {}), trig, src.get("auto_play", [])))
+
+
+@app.post("/api/updates/send")
+def updates_send():
+    return ok({"msg": send_now(find_project(body()["project"]))})
+
+
+@app.post("/api/play")
+def play():
+    b = body()
+    p = find_project(b["project"])
+    require_ci(p)
+    r = gitlab(p, "POST", f"/jobs/{int(b['job'])}/play")
+    log(f"Manual job '{r.get('name')}' started in {p['id']}")
+    return ok(r)
+
+
+@app.post("/api/token")
+def token():
+    save_token(body().get("token"))
+    return ok({"msg": test_token()})
+
+
+@app.post("/api/token/test")
+def token_test():
+    return ok({"msg": test_token()})
+
+
+@app.post("/api/token/delete")
+def token_delete():
+    TOKEN_FILE.unlink(missing_ok=True)
+    log("GitLab token removed from app folder")
+    return ok({"ok": True})
+
+
+@app.post("/api/t3monitor/reveal-key")
+def reveal_key():
+    if not _secret_ok():
+        return send(403, {"error": "Reveal requires a same-origin HTTPS or localhost request"})
+    b = body()
+    key = t3m_key(find_project(b["project"])["id"], b["env"])
+    if not key:
+        return send(404, {"error": "No saved key for this environment"})
+    return ok({"key": key})
+
+
+@app.post("/api/t3monitor/refresh")
+def t3monitor_refresh():
+    b = body()
+    p, env = find_project(b["project"]), b.get("env") or "production"
+    t3m_env(env)
+    try:
+        t3m_fetch(p, env)
+    except RuntimeError:
+        pass                                   # shown via last_error
+    return ok(t3m_view(p["id"], env))
+
+
+@app.post("/api/teams")
+def teams():
+    return ok(save_teams(body()))
+
+
+@app.post("/api/teams/test")
+def teams_test():
+    code = send_teams("T3 Watchdock: test message", "Teams notifications of T3 Watchdock work.",
+                      [("Sent", now().replace("T", " "))])
+    msg = (f"Teams test message accepted by the webhook (HTTP {code}). If it does not appear in the "
+           "channel, check the run history of the Workflow in Teams (Workflows → the flow → Run history).")
+    log(msg)
+    return ok({"msg": msg})
+
+
+@app.post("/api/email")
+def email():
+    return ok(save_email(body()))
+
+
+@app.post("/api/email/test")
+def email_test():
+    e = email_cfg()
+    send_mail("[T3 Watchdock] Test email", "Email notifications of T3 Watchdock work.\n", e)
+    log(f"Test email sent to {', '.join(e['to'])}")
+    return ok({"msg": f"Test email sent to {', '.join(e['to'])}"})
+
+
+@app.post("/api/check-now")
+def check_now():
+    good, result = sched_run("typo3_release")
+    return send(200 if good else 500, {"ok": True} if good else {"error": result})
+
+
+@app.post("/api/scheduler")
+def scheduler_save():
+    return ok(save_sched(body()))
+
+
+@app.post("/api/scheduler/run")
+def scheduler_run():
+    b = body()
+    if b.get("id") not in TASKS:
+        raise RuntimeError("Unknown task")
+    good, result = sched_run(b["id"])
+    return ok({"ok": good, "result": result, "scheduler": sched_view()})
+
+
+@app.post("/api/projects")
+def projects_add():
+    return ok(add_project(body()))
+
+
+@app.post("/api/t3monitor/settings")
+def t3monitor_settings():
+    return ok(update_monitoring(body()))
+
+
+@app.post("/api/projects/update")
+def projects_update():
+    return ok(update_project(body()))
+
+
+@app.post("/api/projects/export")
+def projects_export():
+    if not _secret_ok():
+        return send(403, {"error": "Export requires a same-origin HTTPS or localhost request"})
+    return ok(export_projects())
+
+
+@app.post("/api/projects/import")
+def projects_import():
+    b = body()
+    return ok(import_projects(b.get("data"), bool(b.get("overwrite"))))
+
+
+@app.post("/api/plugin-admin")
+def plugin_admin_save():
+    return ok(save_plugin(body()))
+
+
+@app.post("/api/plugins/<name>/<route>")
+def plugin_post(name, route):
+    return ok(plugin_call("POST", name, route, body()))
+
+
+@app.post("/api/projects/delete")
+def projects_delete():
+    b = body()
+    with lock:
+        cfg = config()
+        proj = next((p for p in cfg["projects"] if p["id"] == b.get("id")), None)
+        if not proj:
+            raise RuntimeError("Project not found")
+        if (b.get("confirm") or "").strip() != (proj.get("name") or proj["id"]):
+            raise RuntimeError("Confirmation does not match the project name")
+        cfg["projects"] = [p for p in cfg["projects"] if p["id"] != b["id"]]
+        save_config(cfg)
+    for env in T3M_ENVS:
+        t3m_key_file(b["id"], env).unlink(missing_ok=True)
+        t3m_auth_file(b["id"], env).unlink(missing_ok=True)
+    log(f"Project removed: {b['id']}")
+    return ok({"ok": True})
+
+
+# ---------------------------------------------------------------- start
+def main():
+    """Replace this process with Gunicorn (settings in gunicorn.conf.py)."""
+    try:
+        import gunicorn  # noqa: F401
+    except ImportError:
+        sys.exit("Gunicorn is not installed: pip install -r requirements.txt (see README)")
+    if "--no-watch" in sys.argv:
+        os.environ["WATCHDOCK_NO_WATCH"] = "1"
+    os.chdir(BASE)
+    os.execvp(sys.executable, [sys.executable, "-m", "gunicorn", "-c", str(BASE / "gunicorn.conf.py"),
+                               "watchdock.server:app"])
+
+
+def stop():
+    stop_event.set()

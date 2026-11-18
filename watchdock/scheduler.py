@@ -1,5 +1,6 @@
 """Background scheduler for periodic tasks."""
 import datetime
+import os
 import re
 import sys
 import threading
@@ -14,7 +15,7 @@ from .updates import send_update_commands
 
 
 # ---------------------------------------------------------------- scheduler
-NO_WATCH = "--no-watch" in sys.argv
+NO_WATCH = "--no-watch" in sys.argv or os.environ.get("WATCHDOCK_NO_WATCH") == "1"   # set by app.py for Gunicorn
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 sched_running = set()
 

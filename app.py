@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T3 Watchdock — local web app (Python stdlib only).
+"""T3 Watchdock — web app (Flask, served by Gunicorn; packages in requirements.txt).
 
 - Lists GitLab projects, runs pipelines, shows jobs, plays manual jobs.
 - Background check of the TYPO3 release API; on a new release it triggers the
@@ -15,7 +15,7 @@ Settings without a UI (e.g. plugins, port) are changed on the command line:
     python3 app.py config unset KEY
 
 Login accounts (also as bin/t3-watchdock …):
-    python3 app.py add-user NAME | set-password NAME | remove-user NAME | list-users
+    python3 app.py add-user NAME | set-password NAME | remove-user NAME | unlock-user NAME | list-users
 """
 import json
 import sys
@@ -48,7 +48,7 @@ def config_cli(args):
     print(f"{rest[0]} {'saved' if cmd == 'set' else 'removed'}")
 
 
-USER_CMDS = ("add-user", "set-password", "remove-user", "list-users")
+USER_CMDS = ("add-user", "set-password", "remove-user", "unlock-user", "list-users")
 
 
 def user_cli(cmd, args):
@@ -56,7 +56,7 @@ def user_cli(cmd, args):
     from watchdock import auth, db
     if cmd == "list-users":
         for u in db.users():
-            print(f"{u['name']}\t{u['created']}")
+            print(f"{u['name']}\t{u['created']}" + (f"\tLOCKED since {u['locked']}" if u["locked"] else ""))
         return
     if len(args) != 1:
         sys.exit(f"usage: {cmd} NAME")
@@ -65,6 +65,10 @@ def user_cli(cmd, args):
         if cmd == "remove-user":
             auth.remove_user(name)
             print(f"User removed: {name}")
+            return
+        if cmd == "unlock-user":
+            auth.unlock_user(name)
+            print(f"User unlocked: {name}")
             return
         if cmd == "add-user":
             auth.check_name(name)
@@ -84,5 +88,8 @@ if __name__ == "__main__":
     elif sys.argv[1:2] and sys.argv[1] in USER_CMDS:
         user_cli(sys.argv[1], sys.argv[2:])
     else:
-        from watchdock.server import main
+        try:
+            from watchdock.server import main
+        except ImportError as e:
+            sys.exit(f"{e}. Install the packages first: pip install -r requirements.txt (see README)")
         main()

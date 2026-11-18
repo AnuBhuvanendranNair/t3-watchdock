@@ -60,6 +60,7 @@ function setTheme(id, save) {
   b.setAttribute("aria-label", b.title);
 }
 setTheme(document.documentElement.dataset.theme || "auto");
+$("#logoutBtn").innerHTML = ic("logout");
 $("#logoutBtn").onclick = () => api("/api/logout", {}).then(() => location.replace("/login"), e => toast(e.message, true));
 $("#themeBtn").onclick = () => {
   const cur = document.documentElement.dataset.theme || "auto";
@@ -99,7 +100,8 @@ function confirmByName(title, bodyHtml, name, action) {
 
 async function refresh() {
   S = await api("/api/state");
-  $("#logoutBtn").textContent = `Sign out ${S.user}`;
+  const lo = $("#logoutBtn"); lo.title = `Sign out ${S.user}`; lo.setAttribute("aria-label", lo.title);
+  const pb = $("#profileBtn"); pb.title = `Profile: ${S.user}`; pb.setAttribute("aria-label", pb.title);
   const pill = $("#tokenPill");
   pill.textContent = S.token_source ? "Token ✓" : "No token";
   pill.className = "pill" + (S.token_source ? "" : " bad");
@@ -118,6 +120,7 @@ async function render() {
   if (a === "activity") return viewActivity();
   if (a === "settings") return viewSettings();
   if (a === "plugins") return viewPlugins();
+  if (a === "profile") return viewProfile();
   if (a === "scheduler") return viewScheduler();
   if (a === "p" && b) {
     const p = proj(decodeURIComponent(b));
@@ -1181,6 +1184,55 @@ function viewSettings() {
 }
 // Plugins page: plugins installed in plugins/<name>/, switch on/off, settings as JSON. Adding plugin code stays a
 // file + rebuild step on purpose: a plugin is Python that runs in the app (no upload without a login).
+// Profile: change the own password (current password required; other sessions are signed out)
+async function viewProfile() {
+  let me;
+  try { me = await api("/api/profile"); } catch (e) { return toast(e.message, true); }
+  const shown = me.full_name || me.name;
+  const initials = shown.split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?";
+  $("#view").innerHTML = `
+    <div class="profile stack">
+      <div class="card pf-hero">
+        <div class="pf-avatar" aria-hidden="true">${esc(initials)}</div>
+        <div><h1 id="pf-shown">${esc(shown)}</h1>
+          <p class="sub">@${esc(me.name)} · member since ${esc((me.created || "").slice(0, 10))}</p></div>
+      </div>
+      <div class="card"><h2>Account</h2>
+        <form id="pfform" class="pf-form">
+          <div><label for="pf-full">Full name</label><input id="pf-full" name="full_name" maxlength="100" autocomplete="name" value="${esc(me.full_name)}" placeholder="First and last name"></div>
+          <div><label for="pf-mail">Email</label><input id="pf-mail" name="email" type="email" maxlength="254" autocomplete="email" value="${esc(me.email)}" placeholder="name@example.com"></div>
+          <div class="actions"><button class="btn" type="submit">Save profile</button></div>
+        </form></div>
+      <div class="card"><h2>Password</h2>
+        <form id="pwform" class="pf-form">
+          <input type="text" name="username" value="${esc(me.name)}" autocomplete="username" style="display:none">
+          <div class="full"><label for="pw-cur">Current password</label><input id="pw-cur" name="current" type="password" autocomplete="current-password" required></div>
+          <div><label for="pw-new">New password</label><input id="pw-new" name="new" type="password" autocomplete="new-password" minlength="12" required></div>
+          <div><label for="pw-rep">Repeat new password</label><input id="pw-rep" name="repeat" type="password" autocomplete="new-password" minlength="12" required></div>
+          <p class="pf-hint full">At least 12 characters. Other sessions are signed out, this one stays. 3 wrong current passwords lock the account.</p>
+          <div class="actions"><button class="btn" type="submit">Change password</button></div>
+        </form></div>
+    </div>`;
+  $("#pfform").onsubmit = async ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    try {
+      const r = await api("/api/profile", {full_name: f.full_name.value, email: f.email.value});
+      $("#pf-shown").textContent = r.full_name || r.name; toast("Profile saved");
+    }
+    catch (e) { toast(e.message, true); }
+  };
+  $("#pwform").onsubmit = async ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    if (f.new.value !== f.repeat.value) return toast("New passwords do not match", true);
+    try {
+      await api("/api/profile/password", {current: f.current.value, new: f.new.value});
+      f.reset(); toast("Password changed. Other sessions were signed out.");
+    } catch (e) { f.current.value = ""; toast(e.message, true); }
+  };
+}
+
 async function viewPlugins() {
   $("#view").innerHTML = `<div class="head"><h1>Plugins</h1></div><p class="empty">Loading…</p>`;
   let list;

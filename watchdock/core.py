@@ -24,10 +24,9 @@ SEVERITY = {-2: "notice", -1: "info", 0: "ok", 1: "warning", 2: "error"}
 HOST = os.environ.get("LAUNCHER_HOST", "127.0.0.1")  # Docker: 0.0.0.0, published on 127.0.0.1 only
 # extra Host header values, e.g. "local-gitlabrunner.local" (Docker publishes it on port 80)
 ALLOWED_HOSTS = {h.strip() for h in os.environ.get("LAUNCHER_ALLOWED_HOSTS", "").split(",") if h.strip()}
-# optional HTTPS listener (e.g. mkcert certificate); runs in addition to plain HTTP
-TLS_CERT = os.environ.get("LAUNCHER_TLS_CERT")
-TLS_KEY = os.environ.get("LAUNCHER_TLS_KEY")
-TLS_PORT = int(os.environ.get("LAUNCHER_TLS_PORT", 8443))
+# behind a reverse proxy (Docker setup with Traefik): take scheme and client address from X-Forwarded-Proto / -For.
+# Only safe while the app port is not reachable except through the proxy.
+BEHIND_PROXY = os.environ.get("LAUNCHER_BEHIND_PROXY") == "1"
 
 
 TYPO3_API = "https://get.typo3.org/api/v1/major/{major}/release/latest"

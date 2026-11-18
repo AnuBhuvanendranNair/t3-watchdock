@@ -19,3 +19,4 @@ watchdock.db-wal
 watchdock.db-shm
 state.json.imported-*
 config.json.imported-*
+.venv/

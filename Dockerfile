@@ -9,7 +9,9 @@ ENV PYTHONUNBUFFERED=1 \
     LAUNCHER_DATA=/data
 
 WORKDIR /app
-COPY app.py ./
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py gunicorn.conf.py ./
 COPY bin/ bin/
 COPY watchdock/ watchdock/
 COPY static/ static/
