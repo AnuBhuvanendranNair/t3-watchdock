@@ -114,6 +114,7 @@ async function render() {
   if (a === "new") return viewForm();
   if (a === "activity") return viewActivity();
   if (a === "settings") return viewSettings();
+  if (a === "plugins") return viewPlugins();
   if (a === "scheduler") return viewScheduler();
   if (a === "p" && b) {
     const p = proj(decodeURIComponent(b));
@@ -1169,6 +1170,53 @@ function viewSettings() {
     try { await saveEmail(); toast("Email settings saved"); closeAfter(ev); } catch (e) { toast(e.message, true); }
   };
   pluginHook("settingsPage", $("#view > .stack"));
+}
+// Plugins page: plugins installed in plugins/<name>/, switch on/off, settings as JSON. Adding plugin code stays a
+// file + rebuild step on purpose: a plugin is Python that runs in the app (no upload without a login).
+async function viewPlugins() {
+  $("#view").innerHTML = `<div class="head"><h1>Plugins</h1></div><p class="empty">Loading…</p>`;
+  let list;
+  try { list = await api("/api/plugin-admin"); } catch (e) { $("#view .empty").textContent = e.message; return; }
+  if (location.hash !== "#/plugins") return;
+  // collapsed row: name (title up to the first ":") + On/Off; click opens the details and the form
+  const card = pl => {
+    const [name, ...rest] = (pl.title || pl.name).split(": "), summary = rest.join(": ");
+    return `<details class="card plugin-card"><summary class="plugin-head">
+        <span class="plugin-name">${esc(name.replace(/\.$/, ""))}</span>
+        <span class="focus-monitor ${pl.enabled ? "is-configured" : "is-disabled"}">${pl.enabled ? "On" : "Off"}</span>
+        ${ic("chev", "plugin-chev")}</summary>
+      <form class="plugin-body" data-plugin="${esc(pl.name)}">
+        ${summary ? `<p class="plugin-desc">${esc(summary[0].toUpperCase() + summary.slice(1))}</p>` : ""}
+        ${pl.description ? `<p class="sub plugin-desc">${esc(pl.description)}</p>` : ""}
+        <p class="sub plugin-desc">Folder: <code>plugins/${esc(pl.name)}/</code>${pl.readme ? ` · documentation in <code>README.md</code>` : ""}</p>
+        <label class="check"><input type="checkbox" name="enabled" ${pl.enabled ? "checked" : ""}> Switched on</label>
+        <label for="pl-${esc(pl.name)}">Settings (JSON)</label>
+        <textarea id="pl-${esc(pl.name)}" name="settings" rows="4" spellcheck="false">${esc(JSON.stringify(pl.settings, null, 2))}</textarea>
+        <div class="hint"><code>{}</code> = defaults.</div>
+        <div class="actions"><button class="btn" type="submit">Save</button></div>
+      </form></details>`;
+  };
+  $("#view").innerHTML = `<div class="head"><div><h1>Plugins</h1>
+      <div class="sub">Optional features, off until switched on here. Saving reloads the page so the plugin's browser part loads.</div></div></div>
+    <div class="stack">
+      ${list.length ? list.map(card).join("") : `<div class="card empty">No plugins installed.</div>`}
+      <div class="card"><h2>Add a plugin</h2><ol class="plugin-steps">
+        <li>Copy the plugin folder to <code>plugins/&lt;name&gt;/</code> in the app folder (it contains <code>plugin.py</code>).</li>
+        <li>Rebuild: <code>docker compose up -d --build</code> (without Docker: restart <code>python3 app.py</code>).</li>
+        <li>Reload this page and switch the plugin on.</li></ol>
+        <p class="sub" style="margin:8px 0 0">Plugins run as code inside the app, so they cannot be uploaded in the browser. Only install plugins you trust.</p></div>
+    </div>`;
+  document.querySelectorAll(".plugin-body").forEach(fm => fm.onsubmit = async ev => {
+    ev.preventDefault();
+    let settings;
+    try { settings = JSON.parse(fm.settings.value.trim() || "{}"); } catch (e) { toast(`Settings are not valid JSON: ${e.message}`, true); return; }
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) { toast("Settings must be a JSON object, e.g. {}", true); return; }
+    const btn = fm.querySelector('[type="submit"]'); btn.disabled = true;
+    try {
+      await api("/api/plugin-admin", {name:fm.dataset.plugin, enabled:fm.enabled.checked, settings});
+      location.reload();
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  });
 }
 async function saveTeams(extra) {
   const f = $("#msform");
