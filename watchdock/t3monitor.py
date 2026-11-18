@@ -348,12 +348,13 @@ def _t3m_url(v):
     return v
 
 
-def save_t3m_key(pid, b):
-    for env, e in T3M_ENVS.items():                          # validate all keys before writing any file
+def save_t3m_key(pid, b, envs=None):                         # envs: limit to these instances (default: all)
+    items = [(env, e) for env, e in T3M_ENVS.items() if envs is None or env in envs]
+    for env, e in items:                                     # validate all keys before writing any file
         k = (b.get(e["form"] + "key") or "").strip()
         if k and not b.get(e["form"] + "key_clear") and (len(k) != 64 or any(c.isspace() for c in k)):
             raise RuntimeError(f"t3monitor key ({e['label']}) must be exactly 64 characters")
-    for env, e in T3M_ENVS.items():
+    for env, e in items:
         f = lambda k: b.get(e["form"] + k)
         if f("key_clear"):
             t3m_key_file(pid, env).unlink(missing_ok=True)

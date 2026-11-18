@@ -12,7 +12,7 @@ from .extensions import ext_changelog, ext_release
 from .gitlab import find_project, gitlab, last_run_status, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, test_token, token_source
 from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_fetch, t3m_key, t3m_key_file, t3m_summary, t3m_view
 from .watcher import resume_mail_watches
-from .projects import add_project, export_projects, import_projects, update_project
+from .projects import add_project, export_projects, import_projects, update_monitoring, update_project
 from .updates import send_now
 from .plugins import NotFound, asset as plugin_asset, assets as plugin_assets, call as plugin_call
 from .scheduler import TASKS, save_sched, sched_run, sched_view, scheduler
@@ -221,6 +221,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": ok, "result": result, "scheduler": sched_view()})
             if path == "/api/projects":
                 return self._send(200, add_project(body))
+            if path == "/api/t3monitor/settings":
+                return self._send(200, update_monitoring(body))
             if path == "/api/projects/update":
                 return self._send(200, update_project(body))
             if path == "/api/projects/export":

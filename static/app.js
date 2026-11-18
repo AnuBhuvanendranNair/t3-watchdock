@@ -72,8 +72,6 @@ function setStyle(id, save) {
   if (st === "default") delete root.dataset.style; else root.dataset.style = st;
   if (save) try { st === "default" ? localStorage.removeItem("style") : localStorage.setItem("style", st); } catch (e) {}
   $("#styleSel").value = root.dataset.style || "default";
-  updateOverviewOrder();
-  if (st === "focus") loadFocusAvatars();
 }
 setStyle(document.documentElement.dataset.style || "default");
 $("#styleSel").onchange = ev => setStyle(ev.target.value, true);
@@ -159,18 +157,23 @@ const RUN_LABEL = {created:"Created", waiting_for_resource:"Waiting for runner",
   canceled:"Canceled", skipped:"Skipped"};
 const since = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000));
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
-function runStatusHtml(pid) {
+// card = project card: a waiting manual job also gets an info button (message in a tooltip); the style decides which one shows
+function runStatusHtml(pid, card) {
   const r = RUNST[pid];
   if (!r) return "";
   if (!r.status) return `<span class="runst" title="${esc(r.error || "")}">status unknown</span>`;
   const active = BUSY.includes(r.status);
   const job = r.job ? ` · ${r.job_status === "manual" ? "▶ " : ""}${esc(r.job)}` : "";
-  return `<span class="runst st s-${esc(r.status)}${active ? " active" : ""}">${active ? `<span class="dot" aria-hidden="true"></span>` : ""}${esc(RUN_LABEL[r.status] || r.status)}${job}${active && r.started ? ` · ${esc(since(r.started))}` : ""}</span>`;
+  const html = `<span class="runst st s-${esc(r.status)}${active ? " active" : ""}">${active ? `<span class="dot" aria-hidden="true"></span>` : ""}${esc(RUN_LABEL[r.status] || r.status)}${job}${active && r.started ? ` · ${esc(since(r.started))}` : ""}</span>`;
+  if (!card || r.status !== "manual") return html;
+  const tip = `${RUN_LABEL.manual}${r.job ? ` · ▶ ${r.job}` : ""}`;
+  return `<span class="runst-full">${html}</span><button type="button" class="runst-info" data-act="runtip" aria-label="${esc(tip)}" aria-expanded="false">${ic("info", "sm")}<span class="runst-tip" role="tooltip">${esc(tip)}</span></button>`;
 }
 function paintRunStatus() {
   document.querySelectorAll("[data-runst]").forEach(el => {
     const r = RUNST[el.dataset.runst];
-    el.innerHTML = runStatusHtml(el.dataset.runst);
+    const html = runStatusHtml(el.dataset.runst, !!el.closest(".focus-project-run"));
+    if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }   // unchanged: keep an open tooltip open
     const card = el.closest(".pcard");
     if (card) card.classList.toggle("run-active", !!r && BUSY.includes(r.status));
   });
@@ -208,7 +211,9 @@ function paintTechFilter() {   // tabs = technology, chips = "All" + versions wi
   S.projects.forEach(p => techVals(p.id, techFilter.tech).forEach(k => count.set(k, (count.get(k) || 0) + 1)));
   if (techFilter.val && !count.has(techFilter.val)) techFilter.val = "";
   // TYPO3 / PHP: the tab already names the product, so the chip shows the version only
-  const short = k => techFilter.tech === "typo3" || techFilter.tech === "php" ? k.replace(/^\S+ /, "") : k;
+  // TYPO3 chips get a "v" prefix: v13
+  const short = k => techFilter.tech === "typo3" ? "v" + k.replace(/^\S+ /, "")
+    : techFilter.tech === "php" ? k.replace(/^\S+ /, "") : k;
   const chip = (v, label, n) => `<button type="button" class="tchip" data-act="tfval" data-v="${esc(v)}" aria-pressed="${techFilter.val === v}"
     title="${esc(v ? `${v}: ${n} project${n === 1 ? "" : "s"}` : "All projects")}">${esc(label)}${v ? `<span class="tcount">${n}</span>` : ""}</button>`;
   box.innerHTML = chip("", "All") + [...count.keys()].sort(verDesc).map(k => chip(k, short(k), count.get(k))).join("")
@@ -265,37 +270,23 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
   const projectsWithRuns = new Set(S.projects_with_runs || []);
   const cards = S.projects.map(p => {
     const last = S.runs.find(r => r.project === p.id);
-    const a = p.auto_typo3 || {};
     const monitoring = T3M_ENVS.filter(e => p[e.cfg]?.url).map(e => {
       const ready = t3mOn(p, e);
       return `<span class="focus-monitor ${ready ? "is-configured" : "is-pending"}">
-        ${esc(e.label)}${ready ? "" : " · Key missing"}
+        ${envLbl(e)}${ready ? "" : " · Key missing"}
       </span>`;
     }).join("");
-    return `<a class="pcard" data-pid="${esc(p.id)}" href="${pUrl(p)}">
-      <div class="name">${esc(p.name)}</div>
-      <div class="sub">${esc(p.path || "–")}</div>
-      <div class="chips">
-        ${!hasCI(p) ? `<span class="chip" title="No GitLab CI/CD: TYPO3 monitoring only">no CI/CD</span>` : ""}
-        ${p.ref ? `<span class="chip ref">${esc(p.ref)}</span>` : ""}
-        ${p.production?.ref ? `<span class="chip ref" title="Production branch">→ ${esc(p.production.ref)}</span>` : ""}
-        ${(p.auto_play || []).length ? `<span class="chip">auto-play: ${esc(p.auto_play.join(", "))}</span>` : ""}
-        ${a.enabled ? `<span class="chip">TYPO3 ${esc(a.major)} auto-update</span>` : ""}
-      </div>
-      <div class="srvline" data-srv="${esc(p.id)}"></div>
-      <div class="last">${!hasCI(p) ? "Monitoring only" : last ? `<span data-runst="${esc(p.id)}">${runStatusHtml(p.id)}</span> Last run: #${esc(last.pipeline)} · ${esc(fmt(last.t))} · ${esc(last.trigger)}` : "No runs yet"}</div>
-    </a>
-    <article class="pcard focus-project" data-pid="${esc(p.id)}">
+    return `<article class="pcard focus-project" data-pid="${esc(p.id)}">
       <a class="focus-project-link name" href="${pUrl(p)}">
         ${projectsWithRuns.has(p.id) ? `<span class="focus-avatar" data-project="${esc(p.id)}" data-gitlab="${esc(p.gitlab_url)}" aria-hidden="true">${esc(p.name.trim().split(/\s+/u, 2).map(word => Array.from(word)[0] || "").join("").toLocaleUpperCase())}</span>` : ""}
-        <span class="focus-project-name">${esc(p.name)}</span><span class="focus-project-arrow" aria-hidden="true">›</span>
+        <span class="focus-project-name" title="${esc(p.name)}">${esc(p.name)}</span><span class="focus-project-arrow" aria-hidden="true">›</span>
       </a>
       <div class="focus-monitoring" role="group" aria-label="TYPO3 monitoring">
         ${monitoring || `<span class="focus-monitor">Monitoring not configured</span>`}
       </div>
       <div class="focus-project-run" role="group" aria-label="GitLab CI/CD">
         ${!hasCI(p) ? `<span class="focus-monitor focus-ci is-disabled">CI/CD · Disabled</span>` : last
-          ? `<a class="focus-monitor focus-ci is-configured" href="${pUrl(p)}/pl/${Number(last.pipeline)}" aria-label="Open latest CI/CD run #${esc(last.pipeline)}">CI/CD · #${esc(last.pipeline)}</a> <span data-runst="${esc(p.id)}">${runStatusHtml(p.id)}</span>`
+          ? `<a class="focus-monitor focus-ci is-configured" href="${pUrl(p)}/pl/${Number(last.pipeline)}" aria-label="Open latest CI/CD run #${esc(last.pipeline)}">CI/CD · #${esc(last.pipeline)}</a> <span data-runst="${esc(p.id)}">${runStatusHtml(p.id, true)}</span>`
           : `<span class="focus-monitor focus-ci is-pending">CI/CD · No runs yet</span>`}
       </div>
     </article>`;
@@ -318,7 +309,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
     ${S.projects.length ? `<div class="card full" id="t3sum" style="margin-top:18px"><h2>TYPO3 status – Production &amp; Staging</h2><p class="empty">Loading…</p></div>` : ""}`;
   $("#view").dataset.pview = projView();
   paintTechFilter();
-  if (document.documentElement.dataset.style === "focus") loadFocusAvatars();
+  loadFocusAvatars();
   paintRunStatus();
   if (S.runs.length) loadRunStatus();          // server caches it (8 s active, 5 min finished)
   if (!S.projects.length) return;
@@ -339,20 +330,6 @@ async function loadT3mSummary(pre) {
   try { d = pre ?? await api("/api/t3monitor/summary"); T3SUM = d; }
   catch (err) { if ($("#t3sum")) $("#t3sum").innerHTML = `<h2>TYPO3 status</h2><p class="empty">Error: ${esc(err.message)}</p>`; return; }
   const box = $("#t3sum"); if (!box) return;
-  // server grid in each project card: TYPO3 / PHP / DB per instance; ↑ = TYPO3 update, ≠ = staging differs from production
-  document.querySelectorAll(".srvline[data-srv]").forEach(el => {
-    const s = d[el.dataset.srv] || {}, a = s.production?.has_data ? s.production : null;
-    const envs = [["PROD", "prod", s.production], ["STG", "stg", s.staging]].filter(([, , x]) => x?.has_data);
-    if (!envs.length) return;
-    const cell = (x, k, txt, full, suffix = "") => {
-      const diff = a && x !== a && a[k] && x[k] && a[k] !== x[k];
-      return `<span class="${diff ? "diff" : ""}" title="${esc(full || x[k] || "")}${diff ? ` (production: ${esc(a[k])})` : ""}">${diff ? "≠ " : ""}${esc(txt || "–")}${suffix}</span>`;
-    };
-    const t3 = x => { const latest = S.typo3_latest[String(x.typo3 || "").split(".")[0]];
-      return cell(x, "typo3", x.typo3, "", latest && x.typo3 && verCmp(latest, x.typo3) > 0 ? ` <span class="upd" title="Update available: ${esc(latest)}">↑</span>` : ""); };
-    el.innerHTML = `<span></span><span class="h">TYPO3</span><span class="h">PHP</span><span class="h">DB</span>` + envs.map(([lbl, cls, x]) =>
-      `<span class="env ${cls}">${lbl}</span>${t3(x)}${cell(x, "php", x.php)}${cell(x, "db", dbShort(x.db), x.db)}`).join("");
-  });
   // labelled server values; ref = production instance: staging values that differ get ≠ (orange)
   const srvTags = (x, ref) => [["PHP", "php", x.php, x.php], ["DB", "db", dbShort(x.db), x.db], ["Web", "webserver", x.webserver, x.webserver]]
     .filter(([, , txt]) => txt).map(([lbl, k, txt, full]) => {
@@ -368,10 +345,17 @@ async function loadT3mSummary(pre) {
       ${srv ? `<div class="srvtags">${srv}</div>` : ""}
       ${x.last_error ? ` <span class="sev-2" title="${esc(x.last_error)}">⚠ last check failed</span>` : ""}`;
   };
-  const ew = x => !x?.has_data ? `<span class="sub">–</span>`
-    : `<span class="badge ${x.errors ? "sev-2" : "sev0"}">${x.errors} E</span> <span class="badge ${x.warnings ? "sev-1" : "sev0"}">${x.warnings} W</span>`
-      + (x.advisories ? ` <span class="badge sev-2" title="${x.advisories} security advisor${x.advisories === 1 ? "y" : "ies"} affect this instance">${x.advisories} SA</span>` : "")
-      + (x.php_check?.severity ? ` <span class="badge sev-${x.php_check.severity}" title="${esc(x.php_check.text)}">PHP</span>` : "");
+  // health of one instance: icon chips (errors, warnings, security advisories, PHP version check); OK when nothing to report
+  const hc = (icon, cls, txt, tip) => `<span class="hchip ${cls}" title="${esc(tip)}" aria-label="${esc(tip)}">${ic(icon)}<b>${esc(txt)}</b></span>`;
+  const pl = (n, w, ws = w + "s") => `${n} ${n === 1 ? w : ws}`;
+  const ew = x => {
+    if (!x?.has_data) return `<span class="sub">–</span>`;
+    const chips = [x.errors && hc("err", "sev-2", x.errors, pl(x.errors, "error")),
+      x.warnings && hc("warn", "sev-1", x.warnings, pl(x.warnings, "warning")),
+      x.advisories && hc("shield", "sev-2", x.advisories, `${pl(x.advisories, "security advisory", "security advisories")} affect this instance`),
+      x.php_check?.severity && hc("clock", `sev-${x.php_check.severity}`, "PHP", x.php_check.text)].filter(Boolean);
+    return chips.join("") || hc("ok", "sev0", "OK", "No errors, warnings or security advisories");
+  };
   const projects = S.projects.map(p => {
     const s = d[p.id] || {}, a = s.production, b = s.staging;
     const checked = [a?.last_check, b?.last_check].filter(Boolean).sort()[0];
@@ -381,13 +365,12 @@ async function loadT3mSummary(pre) {
   if (overviewOptions.sort === "name") focusProjects.sort((a, b) => a.p.name.localeCompare(b.p.name));
   if (overviewOptions.sort === "checked") focusProjects.sort((a, b) => (b.checked || "").localeCompare(a.checked || ""));
   const ranks = new Map(focusProjects.map(({p}, index) => [p.id, index + 1]));
-  const rows = projects.map(({p, a, b, checked}, index) => {
+  const rows = projects.map(({p, a, b, checked}) => {
     const diff = a?.typo3 && b?.typo3 && a.typo3 !== b.typo3;
     const pdiff = a?.php && b?.php && a.php !== b.php;
-    return `<tr data-pid="${esc(p.id)}" data-rank="${ranks.get(p.id)}" data-original-order="${index}"><td class="focus-row-number">${ranks.get(p.id)}</td><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
+    return `<tr data-pid="${esc(p.id)}" data-rank="${ranks.get(p.id)}"><td class="focus-row-number">${ranks.get(p.id)}</td><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
       ${[[a, ver(a)], [b, ver(b, a)]].map(([x, version]) => `<td class="${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${version}
-        ${x?.has_data ? `<div class="focus-env-health">${ew(x)}</div>` : ""}</td>
-        <td class="overview-health ${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${ew(x)}</td>`).join("")}
+        ${x?.has_data ? `<div class="focus-env-health">${ew(x)}</div>` : ""}</td>`).join("")}
       <td class="sub">${checked ? esc(fmt(checked)) : "–"}</td></tr>`;
   }).join("");
   box.innerHTML = `<div class="head" style="margin-bottom:8px"><div><h2 style="margin:0">TYPO3 status – Production &amp; Staging</h2>
@@ -399,10 +382,8 @@ async function loadT3mSummary(pre) {
         </select>
       </div></div>
     <div class="wrap"><table class="typo3-overview"><thead><tr><th scope="col" class="focus-row-number" aria-label="Row number">#</th><th scope="col">Project</th>
-      <th scope="col"><span class="overview-label">Prod TYPO3</span><span class="focus-env-label">Production</span></th>
-      <th scope="col" class="overview-health">Prod E/W</th>
-      <th scope="col"><span class="overview-label">Stg TYPO3</span><span class="focus-env-label">Staging</span></th>
-      <th scope="col" class="overview-health">Stg E/W</th>
+      <th scope="col">${envLbl(T3M_ENVS[0])}</th>
+      <th scope="col">${envLbl(T3M_ENVS[1])}</th>
       <th title="Oldest check of the configured instances">Last check</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   updateOverviewOrder();
   paintTechFilter();
@@ -416,12 +397,11 @@ async function loadT3mSummary(pre) {
 function updateOverviewOrder() {
   const body = $("#t3sum tbody");
   if (!body) return;
-  const key = document.documentElement.dataset.style === "focus" ? "rank" : "originalOrder";
-  body.append(...[...body.rows].sort((a, b) => Number(a.dataset[key]) - Number(b.dataset[key])));
+  body.append(...[...body.rows].sort((a, b) => Number(a.dataset.rank) - Number(b.dataset.rank)));
 }
 
 // "System overview" card (Production / Staging tiles); filled by loadT3m via #system-<env>
-const systemOverviewCard = () => `
+const systemOverviewCard = p => `
     <section class="card system-overview">
       <div class="system-overview-heading">
         <h2>System overview</h2>
@@ -429,7 +409,10 @@ const systemOverviewCard = () => `
       <div class="system-environments">
         ${T3M_ENVS.map(e => `<section>
           <div class="system-env-head"><h3>${esc(e.label)}</h3>
-            ${icBtn("details", `${e.label}: TYPO3 status details`, `data-act="t3mopen" data-env="${e.env}"`, "btn sec sm icon")}</div>
+            <div class="system-env-actions">
+              ${t3mOn(p, e) ? progBtn(`t3m:${p.id}:${e.env}`, `Refresh ${e.label} status now`, `data-act="t3mrefresh" data-env="${e.env}"`, "btn sec sm icon") : ""}
+              ${icBtn("edit", `Edit ${e.label} monitoring settings`, `data-act="t3medit" data-env="${e.env}"`, "btn sec sm icon")}
+              ${icBtn("details", `${e.label}: TYPO3 status details`, `data-act="t3mopen" data-env="${e.env}"`, "btn sec sm icon")}</div></div>
           <div class="system-details" id="system-${e.env}" aria-live="polite">Loading…</div>
         </section>`).join("")}
       </div>
@@ -497,7 +480,7 @@ function viewProject(p, pipelineId) {
         <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
     </div>
-    ${systemOverviewCard()}
+    ${systemOverviewCard(p)}
     <div class="two">
       <div class="stack">
         ${envs.map(e => `<div class="card pipe-env pipe-${e.slot}">
@@ -563,7 +546,7 @@ function viewProjectNoCI(p) {
         <a class="btn sec icon" href="${pUrl(p)}/edit" title="Edit project" aria-label="Edit project">${ic("edit")}</a>
       </div>
     </div>
-    ${systemOverviewCard()}
+    ${systemOverviewCard(p)}
 
     <div class="card danger-zone" style="margin-top:18px"><h2>Danger zone</h2>
       <p class="sub" style="margin:0 0 10px">Removes the project from the launcher only.</p>
@@ -857,10 +840,12 @@ const DEFAULTS = {gitlab_url:"https://gitlab.gingco.de", ref:"staging", variable
 
 // t3monitor instances per project (cfg = config key, f = form field prefix, keys/auth = lists in /api/state)
 const T3M_ENVS = [
-  {env:"production", label:"Production", cfg:"t3monitor", f:"t3m_", keys:"t3monitor_keys", auth:"t3monitor_auth",
+  {env:"production", label:"Production", short:"PRD", cfg:"t3monitor", f:"t3m_", keys:"t3monitor_keys", auth:"t3monitor_auth",
    ph:"https://www.example.com/", hint:"Live TYPO3 site with the t3monitor extension installed."},
-  {env:"staging", label:"Staging", cfg:"t3monitor_staging", f:"t3ms_", keys:"t3monitor_staging_keys", auth:"t3monitor_staging_auth",
+  {env:"staging", label:"Staging", short:"STG", cfg:"t3monitor_staging", f:"t3ms_", keys:"t3monitor_staging_keys", auth:"t3monitor_staging_auth",
    ph:"https://staging.example.com/", hint:"Staging instance with the t3monitor extension installed (own key)."}];
+// Environment name: full label, plus a short code (PRD / STG) that a style can show instead (Terminal does)
+const envLbl = e => `<span class="env-l">${esc(e.label)}</span><span class="env-s">${esc(e.short)}</span>`;
 const t3mOn = (p, e) => !!(p[e.cfg]?.url && S[e.keys]?.includes(p.id));
 
 function t3mFields(e, p) {
@@ -895,6 +880,66 @@ function t3mFields(e, p) {
           ${hasAuth ? `<label class="check" style="margin-top:6px"><input type="checkbox" name="${e.f}auth_clear"> Remove stored password</label>` : ""}</div>
         </details>
       </div></section>`;
+}
+
+// Key tools of the t3monitor fields (t3mFields): generate / reveal / copy, reveal saved key. Used by the project form
+// and the per-environment settings modal.
+function keyTools(fm, p) {
+  const E = fm.elements;
+  // Generate a 64-char t3monitor key locally (32 random bytes → hex).
+  // Non-destructive: nothing is stored until "Save changes"; the SAME value must be set as the site's encryption_key.
+  fm.addEventListener("click", async ev => {
+    const b = ev.target.closest("[data-gen], [data-reveal]"); if (!b) return;
+    const name = b.dataset.gen || b.dataset.reveal, inp = E[name];
+    if (b.dataset.savedEnv) {
+      const saved = fm.querySelector(`#${name.replace(/key$/, "saved-key")}`);
+      const copy = fm.querySelector(`[data-saved-copy][data-copy="${name}"]`);
+      if (!saved.hidden) {
+        saved.hidden = copy.hidden = true;
+        saved.value = "";
+        b.textContent = "Reveal saved key";
+        b.setAttribute("aria-expanded", "false");
+        return;
+      }
+      b.disabled = true;
+      try {
+        const {key} = await api("/api/t3monitor/reveal-key", {project:p.id, env:b.dataset.savedEnv});
+        if (!fm.isConnected) return;
+        saved.value = key;
+        saved.hidden = copy.hidden = false;
+        b.textContent = "Hide saved key";
+        b.setAttribute("aria-expanded", "true");
+      } catch (e) { toast(e.message, true); }
+      finally { b.disabled = false; }
+      return;
+    }
+    if (b.dataset.reveal) {
+      if (!inp.value) { toast("Generate or enter a key first", true); return; }
+      inp.type = inp.type === "password" ? "text" : "password";
+      b.textContent = inp.type === "text" ? "Hide" : "Reveal";
+      return;
+    }
+    inp.value = [...crypto.getRandomValues(new Uint8Array(32))].map(x => x.toString(16).padStart(2, "0")).join("");
+    inp.type = "password";
+    fm.querySelector(`[data-reveal="${name}"]:not([data-saved-env])`).textContent = "Reveal";
+    inp.dispatchEvent(new Event("input", {bubbles:true}));
+  });
+  // Copy the current key field value to the clipboard (clipboard API, with a legacy fallback for insecure contexts).
+  fm.addEventListener("click", async ev => {
+    const b = ev.target.closest("[data-copy]"); if (!b) return;
+    ev.preventDefault();
+    const saved = fm.querySelector(`#${b.dataset.copy.replace(/key$/, "saved-key")}`);
+    const inp = b.hasAttribute("data-saved-copy") ? saved : E[b.dataset.copy], val = inp.value.trim();
+    if (!val) { toast("Nothing to copy — generate or enter a key first", true); return; }
+    try {
+      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(val);
+      else {
+        inp.focus(); inp.select();
+        if (!document.execCommand("copy")) throw new Error("Clipboard unavailable");
+      }
+      toast("Key copied to clipboard");
+    } catch (e) { toast("Copy failed. Reveal the key to copy it manually.", true); }
+  });
 }
 
 function viewForm(p) {
@@ -956,60 +1001,7 @@ function viewForm(p) {
     const details = target.closest("details");
     if (details) details.open = true;
   }, true);
-  // Generate a 64-char t3monitor key locally (32 random bytes → hex).
-  // Non-destructive: nothing is stored until "Save changes"; the SAME value must be set as the site's encryption_key.
-  fm.addEventListener("click", async ev => {
-    const b = ev.target.closest("[data-gen], [data-reveal]"); if (!b) return;
-    const name = b.dataset.gen || b.dataset.reveal, inp = E[name];
-    if (b.dataset.savedEnv) {
-      const saved = fm.querySelector(`#${name.replace(/key$/, "saved-key")}`);
-      const copy = fm.querySelector(`[data-saved-copy][data-copy="${name}"]`);
-      if (!saved.hidden) {
-        saved.hidden = copy.hidden = true;
-        saved.value = "";
-        b.textContent = "Reveal saved key";
-        b.setAttribute("aria-expanded", "false");
-        return;
-      }
-      b.disabled = true;
-      try {
-        const {key} = await api("/api/t3monitor/reveal-key", {project:p.id, env:b.dataset.savedEnv});
-        if (!fm.isConnected) return;
-        saved.value = key;
-        saved.hidden = copy.hidden = false;
-        b.textContent = "Hide saved key";
-        b.setAttribute("aria-expanded", "true");
-      } catch (e) { toast(e.message, true); }
-      finally { b.disabled = false; }
-      return;
-    }
-    if (b.dataset.reveal) {
-      if (!inp.value) { toast("Generate or enter a key first", true); return; }
-      inp.type = inp.type === "password" ? "text" : "password";
-      b.textContent = inp.type === "text" ? "Hide" : "Reveal";
-      return;
-    }
-    inp.value = [...crypto.getRandomValues(new Uint8Array(32))].map(x => x.toString(16).padStart(2, "0")).join("");
-    inp.type = "password";
-    fm.querySelector(`[data-reveal="${name}"]:not([data-saved-env])`).textContent = "Reveal";
-    inp.dispatchEvent(new Event("input", {bubbles:true}));
-  });
-  // Copy the current key field value to the clipboard (clipboard API, with a legacy fallback for insecure contexts).
-  fm.addEventListener("click", async ev => {
-    const b = ev.target.closest("[data-copy]"); if (!b) return;
-    ev.preventDefault();
-    const saved = fm.querySelector(`#${b.dataset.copy.replace(/key$/, "saved-key")}`);
-    const inp = b.hasAttribute("data-saved-copy") ? saved : E[b.dataset.copy], val = inp.value.trim();
-    if (!val) { toast("Nothing to copy — generate or enter a key first", true); return; }
-    try {
-      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(val);
-      else {
-        inp.focus(); inp.select();
-        if (!document.execCommand("copy")) throw new Error("Clipboard unavailable");
-      }
-      toast("Key copied to clipboard");
-    } catch (e) { toast("Copy failed. Reveal the key to copy it manually.", true); }
-  });
+  keyTools(fm, p);
   // Pre-fill from GitLab: only fields the user has not typed in; when editing, only empty ones.
   const touched = new Set();
   fm.addEventListener("input", ({target}) => {
@@ -1252,7 +1244,44 @@ const actions = {
     r.open = true; r.scrollIntoView({block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
   },
   t3mopen(el) { const d = $(`#t3dlg-${el.dataset.env}`); if (!d) return; d.showModal(); d.focus(); },
+  runtip(el) {   // info button of a waiting manual job: click toggles the tooltip (hover / keyboard focus show it too)
+    const open = !el.classList.contains("open");
+    document.querySelectorAll(".runst-info.open").forEach(b => { b.classList.remove("open"); b.setAttribute("aria-expanded", "false"); });
+    el.classList.toggle("open", open); el.setAttribute("aria-expanded", String(open));
+  },
   t3mclose(el) { el.closest("dialog")?.close(); },
+  // Monitoring settings of one environment (same fields as the project form); saves only this instance
+  t3medit(el) {
+    const p = proj($("#view").dataset.project), e = T3M_ENVS.find(x => x.env === el.dataset.env);
+    const d = document.createElement("dialog");
+    d.className = "t3dlg t3edit";
+    d.setAttribute("aria-label", `${e.label} monitoring settings`);
+    d.innerHTML = `<form class="t3edit-form">${t3mFields(e, p)}
+      <div class="actions project-form-actions"><button class="btn" type="submit">Save changes</button>
+        <button type="button" class="btn sec" data-cancel>Cancel</button></div></form>`;
+    const fm = d.querySelector("form");
+    keyTools(fm, p);
+    fm.addEventListener("input", ({target}) => {
+      const draft = fm.querySelector(`[data-key-draft="${target.name}"]`);
+      if (draft) draft.hidden = !target.value;
+    });
+    fm.addEventListener("invalid", ({target}) => { const x = target.closest("details"); if (x) x.open = true; }, true);
+    fm.querySelector("[data-cancel]").onclick = () => d.close();
+    d.onclose = () => d.remove();
+    fm.onsubmit = async ev => {
+      ev.preventDefault();
+      const f = new FormData(fm), btn = fm.querySelector('[type="submit"]');
+      const body = {id:p.id, env:e.env,
+        ...Object.fromEntries(["url", "key", "auth_user", "auth_password"].map(k => [e.f + k, f.get(e.f + k) || ""])),
+        [e.f + "key_clear"]:f.get(e.f + "key_clear") === "on", [e.f + "auth_clear"]:f.get(e.f + "auth_clear") === "on"};
+      btn.disabled = true;
+      try {
+        await api("/api/t3monitor/settings", body);
+        await refresh(); d.close(); toast(`${e.label} monitoring saved`); render();
+      } catch (err) { toast(err.message, true); btn.disabled = false; }
+    };
+    document.body.append(d); d.showModal();
+  },
   async run(el) {
     const p = proj($("#view").dataset.project), upd = el.dataset.mode === "update", prod = el.dataset.mode === "production";
     const msg = prod
@@ -1392,6 +1421,7 @@ document.addEventListener("click", e => {
   // click on the modal backdrop (outside the dialog box) closes it
   if (e.target.matches("dialog.t3dlg")) { const r = e.target.getBoundingClientRect();
     if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return e.target.close(); }
+  if (!e.target.closest(".runst-info")) document.querySelectorAll(".runst-info.open").forEach(b => { b.classList.remove("open"); b.setAttribute("aria-expanded", "false"); });
   const el = e.target.closest("[data-act]");
   if (el && actions[el.dataset.act]) { e.preventDefault(); actions[el.dataset.act](el); }
 });
