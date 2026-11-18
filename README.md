@@ -8,7 +8,7 @@
 > docker compose up -d --build                                                 # rebuild, container is now 't3-watchdock'
 > ```
 > Optional, cosmetic: `cd .. && mv gitlab-launcher t3-watchdock && cd t3-watchdock`.
-> Your `config.json`, `state.json` and key files are local and gitignored — untouched, no data migration.
+> Your `config.json`, `state.json` and key files are local and gitignored — untouched by the rename. Since the database switch, the first start imports `config.json` and `state.json` into `watchdock.db` (see *Configuration*).
 
 Small local web app to start GitLab pipelines, watch their jobs and play manual jobs — plus:
 
@@ -37,18 +37,19 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 - **Notifications (Microsoft Teams, email)** — when a pipeline started by the TYPO3 watcher has finished (success, failed, canceled, skipped), a Teams message and/or email with status and link is sent; also when the auto-trigger could not start the pipeline. The t3monitor check sends a summary per scheduled run and alerts on new findings (see below). Set up in *Settings*
 - **TYPO3 status (t3monitor)** — reads TYPO3 version, extensions and status checks from sites with the [t3monitor](https://github.com/BrainAppeal/t3monitor) extension, plus server info (PHP, database, web server, OS kernel without hostname), for the production and (optionally) the staging instance of a project; shown on the project page with a change history (see below)
 - **Extension updates & changelogs** — newest compatible release per extension from Packagist (major updates marked separately); click an extension row to read the changelog of that release
-- **Projects page** — switch between *grid* (project cards) and *list* (TYPO3 overview table), remembered per browser; filter icon opens tabs per technology (TYPO3, PHP, Database, Web server, OS) with one chip per version and its project count (*All* = no filter; TYPO3 by major, the rest by product + major.minor; a project matches if production or staging matches); refresh icon re-checks the TYPO3 status of every monitored site (4 at a time)
+- **Projects page** — switch between *grid* (project cards) and *list* (TYPO3 overview table), remembered per browser. A card shows the GitLab avatar, name, monitoring pills per environment (*Key missing* when no key is saved) and the latest CI/CD run with its status. Same layout in every style; the style only changes colours and fonts. Filter icon opens tabs per technology (TYPO3, PHP, Database, Web server, OS) with one chip per version and its project count (*All* = no filter; TYPO3 by major, shown as `v13`, the rest by product + major.minor; a project matches if production or staging matches); refresh icon re-checks the TYPO3 status of every monitored site (4 at a time)
 - **Refresh progress** — every refresh icon fills from bottom to top while it works (finished sites plus an estimate for the ones in flight)
-- **TYPO3 overview on the home page** — table (list view) with TYPO3 version (↑ = update available), PHP / database / web server versions and errors/warnings of production and staging per project, *versions differ* / *PHP differs* markers and the oldest last check; data from the last t3monitor check
-- **PHP version & security advisories** — scheduled check of every instance: PHP version against [endoflife.date](https://endoflife.date/php) (*end of life*, *security fixes only*, newer patch release available) and TYPO3 core (`typo3/cms-core`) plus public extensions against the [Packagist security advisories](https://packagist.org/apidoc#list-security-advisories) (FriendsOfPHP, GitHub). Uses the data of the last t3monitor check (no extra request to the sites). Results: *Security* section on the project page, *SA* / *PHP* badges in the overview; Teams/email message only for findings not reported before
+- **TYPO3 overview on the home page** — table (list view) with row numbers and a sort select (project order, name, newest check); per project and environment the TYPO3 version (↑ = update available), PHP / database / web server versions and icon chips with counts: errors (circle), warnings (triangle), security advisories (shield), PHP version check (clock), *OK* when there is nothing to report (tooltip = full text); *versions differ* / *PHP differs* markers and the oldest last check; data from the last t3monitor check
+- **PHP version & security advisories** — scheduled check of every instance: PHP version against [endoflife.date](https://endoflife.date/php) (*end of life*, *security fixes only*, newer patch release available) and TYPO3 core (`typo3/cms-core`) plus public extensions against the [Packagist security advisories](https://packagist.org/apidoc#list-security-advisories) (FriendsOfPHP, GitHub). Uses the data of the last t3monitor check (no extra request to the sites). Results: *Security* section on the project page, shield / clock chips in the overview; Teams/email message only for findings not reported before
 - **Scheduler** — page to set when the TYPO3 release check, the t3monitor check and the security check run: every N hours or daily at a fixed time on chosen weekdays; shows last run, result and next run, with *Run now*
 - **Run history & log** — kept in the SQLite database `watchdock.db` (all runs, newest 10 000 log entries)
+- **Plugins page** — nav bar, after *Settings*: one row per plugin in `plugins/` with name and On/Off; click to open the description, the on/off switch and the plugin's settings (JSON). See *Plugins*
 - **Save & close** — Scheduler and Settings forms have *Save* (stay on the page) and *Save & close* (back to Projects)
 - **Flash messages** — results and errors appear top right (green ✓ / red ⚠; 6 s, errors 12 s; click to close)
 - **Icon buttons** — actions are icons with a tooltip (also the accessible name); icon set: [Lucide](https://lucide.dev), see *Icons*
 - **Dark / light theme** — switch in the header: monitor icon *Auto* (follows the system setting) → sun *Light* → moon *Dark*; the choice is saved in the browser (`localStorage`) and applied before the page is drawn
-- **Focus style** — choose *Focus* in the header style selector for a quieter layout with less repeated copy. It follows the Auto, Light, or Dark setting and is saved per browser.
-- **Terminal style** — monospace font everywhere (system SF Mono/Menlo, no web fonts), square corners, outlined buttons, `$ ~/t3 watchdock` prompt with blinking cursor, `#`/`##` heading prefixes and `./` nav links; *Dark* = phosphor green on black, *Light* = paper terminal; saved per browser
+- **Focus style** — choose *Focus* in the header style selector for a quieter look with less repeated copy (its projects page layout is now the layout of every style). It follows the Auto, Light, or Dark setting and is saved per browser.
+- **Terminal style** — monospace font everywhere (system SF Mono/Menlo, no web fonts), square corners, outlined buttons, `$ ~/t3 watchdock` prompt with blinking cursor, `#`/`##` heading prefixes and `./` nav links; project cards of equal height with the CI/CD line at the bottom, environments as `PRD` / `STG`, a waiting manual job as an info icon with the message in a tooltip (hover, focus or click); *Dark* = phosphor green on black, *Light* = paper terminal; saved per browser
 - **Turbo C++ style** — classic DOS IDE look in the 16-colour CGA palette — grey menu bar with red hotkey letters and green selection, windows with double borders and centered titles, green buttons with shadow, cyan input fields; *Dark* = blue editor screen, *Light* = grey dialog look
 
 ## Requirements
@@ -172,8 +173,8 @@ Page *Scheduler* (top menu) lists the automatic tasks:
 ## TYPO3 status (t3monitor)
 
 1. In the TYPO3 site: *Admin Tools → Settings → Extension Configuration → t3monitor → encryption_key* (64 characters).
-2. In the launcher: project → **Edit** → *t3monitor – Production* and/or *t3monitor – Staging*: site URL and key → **Save changes**. Each instance has its own key (the staging site has its own `encryption_key`).
-3. The project page shows a *System overview* tile per instance (TYPO3, PHP, database, web server, error/warning badges, last check). The expand icon (or a badge) opens the **TYPO3 status** modal: site, environment, check time and schedule; a banner (*N errors and M warnings need attention* / *All checks passing*, with *Review problems*); TYPO3, Security, Extensions, *Unchanged since*; server chips; and the expandable rows *Problems*, *Security* (only with findings), *All status checks*, *Extensions*, *Update history* and *Change history*. The refresh icon in the modal fetches that instance immediately, the one in the page header both instances; otherwise on the schedule of the *t3monitor check* task in *Scheduler*.
+2. In the launcher: project → **Edit** → *t3monitor – Production* and/or *t3monitor – Staging*: site URL and key → **Save changes**. Or use the pencil on the *Production* / *Staging* tile of the project page: a modal with the same fields for that instance only (saves only that instance). Each instance has its own key (the staging site has its own `encryption_key`).
+3. The project page shows a *System overview* tile per instance (TYPO3, PHP, database, web server, error/warning badges, last check) with three icons: refresh (this instance now), pencil (monitoring settings of this instance) and expand. The expand icon (or a badge) opens the **TYPO3 status** modal: site, environment, check time and schedule; a banner (*N errors and M warnings need attention* / *All checks passing*, with *Review problems*); TYPO3, Security, Extensions, *Unchanged since*; server chips; and the expandable rows *Problems*, *Security* (only with findings), *All status checks*, *Extensions*, *Update history* and *Change history*. The refresh icon in the modal fetches that instance immediately, the one in the page header both instances; otherwise on the schedule of the *t3monitor check* task in *Scheduler*.
 4. The home page shows all projects in one table (production and staging side by side).
 
 - Request: `?t3monitor=1&secret=<first 32 chars of the key>&reports=internal,security,installed_extensions,system`; the answer is AES-encrypted with the last 32 chars (never sent), decrypted with `openssl`.
@@ -276,10 +277,12 @@ The UI uses [Lucide](https://lucide.dev) icons (ISC licence, copy in `static/ico
 | `play` | `play` | Run pipeline, play manual job |
 | `update` | `circle-arrow-up` | Run TYPO3 update |
 | `send` | `send` | Send update commands |
-| `edit` | `pencil` | Edit project |
+| `edit` | `pencil` | Edit project, edit monitoring settings of an instance |
 | `patchday` | `calendar-check` | Patchday plugin |
 | `ext` | `external-link` | External links |
 | `details`, `close` | `maximize-2`, `x` | Open / close the status modal |
+| `info` | `info` | Waiting manual job on a project card (Terminal style) |
+| `shield`, `clock` | `shield-alert`, `clock` | Security advisories / PHP check chips in the TYPO3 overview |
 | `err`, `warn`, `ok` | `circle-alert`, `triangle-alert`, `circle-check` | Error / warning badges |
 | `grid`, `list`, `filter`, `plus` | `layout-grid`, `list`, `list-filter`, `plus` | Projects page |
 | `chev` | `chevron-down` | Expandable rows in the status modal |
