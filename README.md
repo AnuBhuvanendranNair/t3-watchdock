@@ -95,7 +95,7 @@ bin/t3-watchdock remove-user NAME     # delete account and its sessions
 bin/t3-watchdock list-users           # names and creation dates
 ```
 
-- **`bin/t3-watchdock`** takes the same commands as `python3 app.py` (start, `config …`, account commands) and works from any directory and through a symlink. When T3 Watchdock is installed with Composer, it is available as `vendor/bin/t3-watchdock` (needs `"bin": ["bin/t3-watchdock"]` in a `composer.json`; this repository has none yet).
+- **`bin/t3-watchdock`** without a command lists all commands. `bin/t3-watchdock start [--no-watch]` starts the app (same as `python3 app.py`); `config …` and the account commands work as with `app.py`. Works from any directory and through a symlink. When T3 Watchdock is installed with Composer, it is available as `vendor/bin/t3-watchdock` (needs `"bin": ["bin/t3-watchdock"]` in a `composer.json`; this repository has none yet).
 - **Docker:** `docker compose exec launcher bin/t3-watchdock add-user NAME`.
 - **Names:** 1–64 characters, letters, digits and `. _ @ -`. **Passwords:** at least 12 characters.
 - **Sessions:** 12 hours from sign-in (no extension on activity). *Sign out NAME* in the header ends the session.
