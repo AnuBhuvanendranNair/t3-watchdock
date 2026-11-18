@@ -42,6 +42,16 @@ SCHEMA = [
         expires INTEGER NOT NULL);
     CREATE INDEX sessions_user ON sessions (user);
     """,
+    # version 4: account lock after failed logins (unlocked only on the command line)
+    """
+    ALTER TABLE users ADD COLUMN failed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN locked TEXT;
+    """,
+    # version 5: basic profile fields, edited by the user on the Profile page
+    """
+    ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT '';
+    """,
 ]
 CONFIG_DEFAULTS = {"port": 8787, "check_interval_hours": 6}
 
@@ -62,6 +72,15 @@ def _connect():
         _migrate(c)
         _conn = c
     return _conn
+
+
+def close():
+    """Close the shared connection (Gunicorn master: never hand an open SQLite connection to a forked worker)."""
+    global _conn
+    with _lock:
+        if _conn is not None:
+            _conn.close()
+            _conn = None
 
 
 @contextlib.contextmanager
@@ -282,12 +301,12 @@ def mail_watches():
 
 # ---------------------------------------------------------------- users and sessions (login, see auth.py)
 def user_get(name):
-    r = _rows("SELECT name, hash FROM users WHERE name = ?", (name,))
+    r = _rows("SELECT name, hash, failed, locked FROM users WHERE name = ?", (name,))
     return r[0] if r else None
 
 
 def users():
-    return _rows("SELECT name, created FROM users ORDER BY name")
+    return _rows("SELECT name, created, locked FROM users ORDER BY name")
 
 
 def user_add(name, pw_hash):
@@ -299,6 +318,32 @@ def user_add(name, pw_hash):
 def user_set_hash(name, pw_hash):
     with tx() as c:
         return c.execute("UPDATE users SET hash = ? WHERE name = ?", (pw_hash, name)).rowcount > 0
+
+
+def user_fail(name, max_failed):
+    """Count a failed login; lock the account at max_failed. -> True if the account is locked now."""
+    with tx() as c:
+        c.execute("UPDATE users SET failed = failed + 1, locked = CASE WHEN failed + 1 >= ? AND locked IS NULL "
+                  "THEN ? ELSE locked END WHERE name = ?",
+                  (max_failed, datetime.datetime.now().isoformat(timespec="seconds"), name))
+        r = c.execute("SELECT locked FROM users WHERE name = ?", (name,)).fetchone()
+        return bool(r and r["locked"])
+
+
+def user_reset_failed(name):
+    """Successful login or unlock: counter to 0, lock removed. -> False if the user does not exist."""
+    with tx() as c:
+        return c.execute("UPDATE users SET failed = 0, locked = NULL WHERE name = ?", (name,)).rowcount > 0
+
+
+def user_profile(name):
+    r = _rows("SELECT name, full_name, email, created FROM users WHERE name = ?", (name,))
+    return r[0] if r else None
+
+
+def user_profile_set(name, full_name, email):
+    with tx() as c:
+        c.execute("UPDATE users SET full_name = ?, email = ? WHERE name = ?", (full_name, email, name))
 
 
 def user_delete(name):
@@ -322,6 +367,7 @@ def session_delete(token_hash):
         c.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
 
 
-def sessions_delete_user(user):
+def sessions_delete_user(user, keep=None):
+    """All sessions of a user, except the one with token hash `keep`."""
     with tx() as c:
-        c.execute("DELETE FROM sessions WHERE user = ?", (user,))
+        c.execute("DELETE FROM sessions WHERE user = ? AND token_hash IS NOT ?", (user, keep))

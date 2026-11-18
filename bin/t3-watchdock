@@ -14,12 +14,13 @@ Commands:
   add-user NAME            new login account (asks for the password)
   set-password NAME        new password, signs the user out everywhere
   remove-user NAME         delete account and its sessions
-  list-users               account names and creation dates
+  unlock-user NAME         unlock an account locked after 3 failed logins
+  list-users               account names, creation dates, locked accounts
   config get [KEY]         show settings
   config set KEY JSON      change a setting, e.g. config set port 8788
   config unset KEY         remove a setting
   help                     this list"""
-COMMANDS = {"start", "add-user", "set-password", "remove-user", "list-users", "config"}
+COMMANDS = {"start", "add-user", "set-password", "remove-user", "unlock-user", "list-users", "config"}
 
 args = sys.argv[1:]
 if not args or args[0] not in COMMANDS:

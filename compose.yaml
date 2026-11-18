@@ -1,16 +1,48 @@
 services:
+  proxy:                        # Traefik: the only container with published ports (HTTPS, timeouts, limits)
+    image: traefik:v3.7.13
+    container_name: t3-watchdock-proxy
+    restart: unless-stopped
+    command:
+      - --global.sendanonymoususage=false
+      - --global.checknewversion=false
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.local.address=:8787
+      - --entrypoints.websecure.transport.respondingTimeouts.readTimeout=30s
+      - --entrypoints.websecure.transport.respondingTimeouts.writeTimeout=300s
+      - --entrypoints.websecure.transport.respondingTimeouts.idleTimeout=180s
+      - --entrypoints.local.transport.respondingTimeouts.readTimeout=30s
+      - --entrypoints.local.transport.respondingTimeouts.writeTimeout=300s
+      - --entrypoints.local.transport.respondingTimeouts.idleTimeout=180s
+      - --entrypoints.web.http.aliasheadersstrategy=delete
+      - --entrypoints.websecure.http.aliasheadersstrategy=delete
+      - --entrypoints.local.http.aliasheadersstrategy=delete
+      - --log.level=WARN
+    ports:
+      - "127.0.0.1:8787:8787"   # http://127.0.0.1:8787
+      - "127.0.0.1:80:80"       # http://local-gitlabrunner.local -> redirects to https
+      - "127.0.0.1:443:443"     # https://local-gitlabrunner.local (needs /etc/hosts entry + mkcert cert in ./certs)
+    volumes:
+      - ./traefik:/etc/traefik/dynamic:ro
+      - ./certs:/certs:ro
+    networks: [backend]
+    depends_on: [launcher]
+
   launcher:
     build: .
     container_name: t3-watchdock
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8787:8787"   # http://127.0.0.1:8787 (must match "port" in config.json)
-      - "127.0.0.1:80:8787"     # http://local-gitlabrunner.local -> redirects to https
-      - "127.0.0.1:443:8443"    # https://local-gitlabrunner.local (needs /etc/hosts entry + mkcert cert in ./certs)
+    expose: ["8787"]            # reachable only through the proxy (no published port)
     environment:
       TZ: Europe/Berlin
       LAUNCHER_ALLOWED_HOSTS: local-gitlabrunner.local
-      LAUNCHER_TLS_CERT: /data/certs/local-gitlabrunner.local.pem
-      LAUNCHER_TLS_KEY: /data/certs/local-gitlabrunner.local-key.pem
+      LAUNCHER_BEHIND_PROXY: "1"  # trust X-Forwarded-Proto / -For (set by Traefik)
     volumes:
-      - ./:/data                # config.json, state.json, .gitlab-token stay in this folder
+      - ./:/data                # watchdock.db and secret files stay in this folder
+    networks: [backend]
+
+networks:
+  backend: {}

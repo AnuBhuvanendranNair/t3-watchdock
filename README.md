@@ -17,7 +17,7 @@ Small local web app to start GitLab pipelines, watch their jobs and play manual 
 - **TYPO3 status per project** (version, extensions, status checks and their history) read via the t3monitor extension,
 - a **Scheduler** page to set when the automatic checks run.
 
-Pure Python standard library, no Python packages. Uses the `openssl` command for t3monitor (built into macOS and the Docker image). Runs on `127.0.0.1` only.
+Python web app ([Flask](https://flask.palletsprojects.com), served by [Gunicorn](https://gunicorn.org); `requirements.txt`). Uses the `openssl` command for t3monitor (built into macOS and the Docker image). Runs on `127.0.0.1` only.
 
 ## Features
 
@@ -54,7 +54,7 @@ Pure Python standard library, no Python packages. Uses the `openssl` command for
 
 ## Requirements
 
-- Python 3 (stdlib only)
+- Python 3 with the packages from `requirements.txt` (Flask, Gunicorn; installed in the Docker image automatically)
 - `openssl` command (for t3monitor; present on macOS and in the Docker image)
 - GitLab personal access token with `api` scope
 - Docker (recommended) — or run directly with Python
@@ -81,9 +81,21 @@ Open <http://127.0.0.1:8787>, sign in, save your GitLab token in *Settings → G
 Without Docker (runs only while the terminal is open):
 
 ```bash
-python3 app.py               # with TYPO3 watcher
-python3 app.py --no-watch    # TYPO3 release check paused (Scheduler)
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # once
+.venv/bin/python app.py               # with TYPO3 watcher (Gunicorn on http://127.0.0.1:8787)
+.venv/bin/python app.py --no-watch    # TYPO3 release check paused (Scheduler)
 ```
+
+`config …` and the account commands need no packages; plain `python3 app.py config get` works without the venv.
+
+### App server (Gunicorn)
+
+`app.py` (and `bin/t3-watchdock start`) replaces itself with Gunicorn, settings in `gunicorn.conf.py`:
+
+- **Exactly one worker** (`workers = 1`), several threads (`threads`, default 16, env `WATCHDOCK_THREADS`). The scheduler and the pipeline mail watches run as threads inside the worker; a second worker would trigger every pipeline and notification twice. Do not raise `workers`.
+- Worker timeout 300 s, graceful stop 10 s (`docker compose stop` / Ctrl+C).
+- Request size max. 10 MB in the app as well (`413`).
+- No access log (as before); errors go to stderr, app events to the Activity log.
 
 ## Login
 
@@ -93,14 +105,18 @@ Every page and every API call needs a signed-in session; without one, pages redi
 bin/t3-watchdock add-user NAME        # new account, asks for the password twice
 bin/t3-watchdock set-password NAME    # new password, signs the user out everywhere
 bin/t3-watchdock remove-user NAME     # delete account and its sessions
-bin/t3-watchdock list-users           # names and creation dates
+bin/t3-watchdock unlock-user NAME     # unlock after 3 failed logins
+bin/t3-watchdock list-users           # names, creation dates, locked accounts
 ```
 
 - **`bin/t3-watchdock`** without a command lists all commands. `bin/t3-watchdock start [--no-watch]` starts the app (same as `python3 app.py`); `config …` and the account commands work as with `app.py`. Works from any directory and through a symlink. When T3 Watchdock is installed with Composer, it is available as `vendor/bin/t3-watchdock` (needs `"bin": ["bin/t3-watchdock"]` in a `composer.json`; this repository has none yet).
 - **Docker:** `docker compose exec launcher bin/t3-watchdock add-user NAME`.
 - **Names:** 1–64 characters, letters, digits and `. _ @ -`. **Passwords:** at least 12 characters.
 - **Sessions:** 12 hours from sign-in (no extension on activity). *Sign out NAME* in the header ends the session.
-- **Failed logins:** 5 failures per client address within 15 minutes block that address for the rest of the window (in memory, reset on restart). Behind a reverse proxy all requests come from the proxy address, so the limit then applies to everyone together.
+- **Account lock:** 3 failed logins in a row lock the account; also the correct password is then refused. Only `unlock-user NAME` or `set-password NAME` on the command line unlock it. A successful login resets the count. Lock and unlock are written to the log.
+- **Failed logins per address:** 5 failures per client address (any name) within 15 minutes block that address for the rest of the window (in memory, reset on restart). Behind a reverse proxy all requests come from the proxy address, so the limit then applies to everyone together.
+- **Profile** (user icon in the header, `#/profile`): full name and email (optional, stored with the account; login name read-only), and change your own password in the browser. Needs the current password; your other sessions are signed out, the current one stays. A wrong current password counts as a failed login (3 lock the account).
+- A locked account is also signed out everywhere.
 - Logins and logouts are written to the log (*Activity*) with the user name.
 - **After updating** an existing instance: the database gets the `users` and `sessions` tables automatically on start, but no account. Run `add-user` once, otherwise nobody can sign in (also not the Patchday browser extension, which uses the signed-in Watchdock tab).
 
@@ -233,6 +249,11 @@ The container restarts automatically (`restart: unless-stopped`), also after a r
 docker compose up -d --build
 ```
 
+Two containers:
+
+- **`t3-watchdock-proxy`** ([Traefik](https://traefik.io) `v3.7.13`, own container, separate from other projects' Traefik): the only part with published ports. HTTPS, timeouts, request size limit, rate limit, security headers. Routes are in `traefik/dynamic.yml` (file provider, no Docker socket).
+- **`t3-watchdock`** (the app): no published port, reachable only through the proxy on the internal network `backend`.
+
 Open <http://127.0.0.1:8787>. All data — `watchdock.db`, `t3monitor/` and the secret files (`.gitlab-token`, `.teams-webhook`, `.smtp-password`, `*.t3monitor-key`, `*.t3monitor-auth`, `*.t3monitor-staging-key`, `*.t3monitor-staging-auth`) — is read from and written to this folder (mounted as `/data`), so it survives rebuilds.
 
 | Task | Command |
@@ -256,16 +277,31 @@ echo "::1 local-gitlabrunner.local" | sudo tee -a /etc/hosts   # avoids 5 s .loc
 docker compose up -d --build
 ```
 
-- http://local-gitlabrunner.local redirects to https (http://127.0.0.1:8787 stays plain HTTP as fallback)
+- Traefik serves HTTPS with the certificate from `certs/` (configured in `traefik/dynamic.yml`); http://local-gitlabrunner.local redirects to https, http://127.0.0.1:8787 stays plain HTTP as fallback
 - `certs/` is gitignored; the certificate is valid for ~2 years, re-run the `mkcert` command to renew
-- Without the certificate files HTTPS is skipped and the app runs on http://127.0.0.1:8787 only
+- Without the certificate files Traefik uses its own self-signed certificate (browser warning); http://127.0.0.1:8787 keeps working
 - Firefox may need `mkcert -install` again (own certificate store)
 
+### Reverse proxy (Traefik)
+
+| Setting | Value | Where |
+|---|---|---|
+| Entry points | `:8787` (plain, `127.0.0.1` / `localhost`), `:80` (redirect), `:443` (HTTPS) | `compose.yaml` |
+| Timeouts | read 30 s, write 300 s (long GitLab / t3monitor calls), idle 180 s | `compose.yaml` |
+| Request size | max. 10 MB (larger: `413`) | `traefik/dynamic.yml` |
+| Rate limit | 50 requests/s per client address, burst 100 (more: `429`) | `traefik/dynamic.yml` |
+| Headers | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`; header names with `_` / `.` aliases are dropped | both |
+
+- The app runs with `LAUNCHER_BEHIND_PROXY=1`: it takes HTTPS and the client address from `X-Forwarded-Proto` / `X-Forwarded-For` (set by Traefik, which overwrites values sent by clients). The failed-login limit then counts the real client address, and session cookies get `Secure` on HTTPS. Never set it when the app port is reachable without the proxy.
+- Traefik reloads `traefik/dynamic.yml` on change; changes in `compose.yaml` need `docker compose up -d`.
+- New hostname: add it to the `Host(...)` rules in `traefik/dynamic.yml`, to `LAUNCHER_ALLOWED_HOSTS` in `compose.yaml`, and a certificate under `tls.certificates`.
+
 Notes:
-- Ports are published on `127.0.0.1` only. Host port must match the `port` setting (default `8787`, `python app.py config get port`), otherwise the Host header check rejects requests.
+- Ports are published on `127.0.0.1` only (proxy). The host port `8787` must match the `port` setting (default `8787`, `python app.py config get port`), otherwise the Host header check rejects requests.
 - Stop any copy of `app.py` running in a terminal first (same port).
 - macOS notifications (TYPO3 auto-trigger) do not work inside the container; use Teams notifications or the Activity log instead.
-- Environment: `LAUNCHER_DATA` (data folder, default: app folder), `LAUNCHER_HOST` (bind address, default `127.0.0.1`), `LAUNCHER_ALLOWED_HOSTS` (extra accepted hostnames, comma-separated), `LAUNCHER_TLS_CERT` / `LAUNCHER_TLS_KEY` / `LAUNCHER_TLS_PORT` (HTTPS listener, default port `8443`).
+- HTTPS is done by Traefik only; the app itself serves plain HTTP (the former `LAUNCHER_TLS_*` settings are gone).
+- Environment: `LAUNCHER_DATA` (data folder, default: app folder), `LAUNCHER_HOST` (bind address, default `127.0.0.1`), `LAUNCHER_ALLOWED_HOSTS` (extra accepted hostnames, comma-separated), `LAUNCHER_BEHIND_PROXY` (`1` = trust `X-Forwarded-*`, see above).
 
 ## Icons
 
@@ -287,6 +323,9 @@ The UI uses [Lucide](https://lucide.dev) icons (ISC licence, copy in `static/ico
 | `grid`, `list`, `filter`, `plus` | `layout-grid`, `list`, `list-filter`, `plus` | Projects page |
 | `chev` | `chevron-down` | Expandable rows in the status modal |
 | `auto`, `sun`, `moon` | `monitor`, `sun`, `moon` | Theme switch |
+| `logout` | `log-out` | Sign out (tooltip shows the signed-in name) |
+| `palette` | `palette` | Style selector in the header |
+| `user` | `user` | Profile page (change own password) |
 
 Use in `static/app.js`: `ic("refresh")` returns the `<svg>`, `icBtn("refresh", "Tooltip text", 'data-act="…"')` an icon-only button (tooltip = accessible name). Plugins get the same helper as `watchdock.ic`.
 
@@ -319,7 +358,8 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 
 ## Security
 
-- Binds to `127.0.0.1` only (Docker: published on `127.0.0.1` only)
+- Binds to `127.0.0.1` only (Docker: only the Traefik proxy is published, on `127.0.0.1`; the app container has no published port)
+- Traefik in front: HTTPS, timeouts, 10 MB request limit, rate limit per client address, security headers (see *Reverse proxy*)
 - Login required for every page and API call. Passwords hashed with `scrypt` (random salt per user); the session cookie is a random token (`HttpOnly`, `SameSite=Strict`, `Secure` on HTTPS) and the database stores only its SHA-256 hash. Failed logins are rate limited; an unknown name takes as long to check as a wrong password
 - Optional HTTPS with a local mkcert certificate
 - `Host` header check against DNS rebinding
@@ -344,12 +384,15 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 | `watchdock/watcher.py` | TYPO3 release watcher, pipeline result mails |
 | `watchdock/projects.py` | Create / update project entries, export / import |
 | `watchdock/scheduler.py` | Background scheduler |
-| `watchdock/server.py` | HTTP server and API routes |
+| `watchdock/server.py` | Flask app: API routes, Host / Origin checks, login check |
+| `gunicorn.conf.py` | Gunicorn settings (1 worker, threads, timeouts; starts the scheduler in the worker) |
+| `requirements.txt` | Python packages (Flask, Gunicorn), pinned |
 | `watchdock/plugins.py` | Plugin loader (routes and browser files of enabled plugins) |
 | `static/` | Web UI (`index.html` with the icon sprite, `login.html`, `style.css`, `app.js`, `icons-LICENSE.txt`) |
 | `plugins/` | Optional plugins, off by default (see *Plugins*) |
 | `config.example.json` | Example configuration (copy to `config.json` before the first start to import it) |
-| `Dockerfile`, `compose.yaml` | Docker setup |
+| `Dockerfile`, `compose.yaml` | Docker setup (app + Traefik proxy) |
+| `traefik/dynamic.yml` | Traefik routes, middlewares (limits, headers) and TLS certificate |
 | `certs/` | mkcert certificate + key (gitignored) |
 | `watchdock.db` | SQLite database (stdlib `sqlite3`, mode `600`): projects, settings, runs, log, TYPO3 baselines, scheduler results, pending notifications, user accounts (password hashes) and sessions (gitignored). On first start an existing `config.json` / `state.json` is imported and renamed to `<name>.imported-<time>` (backup) |
 | `.gitlab-token` | GitLab token (gitignored) |
