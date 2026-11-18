@@ -86,6 +86,18 @@ select.style-sel{width:auto;padding:3px 8px;border-radius:12px;background:var(--
 [data-style="terminal"] .btn.danger:hover:not(:disabled){background:var(--err);color:var(--bg)}
 [data-style="terminal"] .card,[data-style="terminal"] .pcard{box-shadow:none}
 [data-style="terminal"] .pcard:hover{border-color:var(--acc)}
+/* Terminal project cards: same height everywhere (min-height, so a card with unusually long content still grows instead of clipping),
+   roomier inside; the CI/CD line sits at the bottom below a dashed rule */
+[data-style="terminal"] .grid{gap:18px}
+[data-style="terminal"] .env-l{display:none}
+[data-style="terminal"] .env-s{display:inline}
+[data-style="terminal"] .focus-project-run .runst-full{display:none}
+[data-style="terminal"] .runst-info{display:inline-flex}
+[data-style="terminal"] .focus-project{display:flex;flex-direction:column;gap:14px;min-height:232px;padding:20px 22px}
+[data-style="terminal"] .focus-project-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-style="terminal"] .focus-monitoring{margin-top:0;gap:8px}
+[data-style="terminal"] .focus-monitor{padding:3px 10px}
+[data-style="terminal"] .focus-project-run{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:auto;padding-top:14px;border-top:1px dashed var(--bd)}
 [data-style="terminal"] table:not(.typo3-overview) th{text-transform:lowercase}
 [data-style="terminal"] #toast{border-left-width:4px}
 /* turbo style */
@@ -132,7 +144,46 @@ h1{font-size:25px;margin:0}h2{font-size:18px;margin:0 0 12px}
 .pcard{display:block;color:inherit;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;transition:border-color .15s}
 .pcard:hover{border-color:var(--acc)}
 .pcard .name{font-weight:600;font-size:18px}
-.pcard.focus-project{display:none}
+/* Projects page (layout for every style; the style only sets colours and fonts) */
+.env-s{display:none}
+.runst-info{display:none;position:relative;z-index:1;padding:2px;border:0;background:none;color:var(--acc);cursor:pointer;line-height:0}
+.runst-tip{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:5;padding:6px 10px;border:1px solid var(--acc);background:var(--card);color:var(--fg);font-size:13px;line-height:1.4;white-space:nowrap;visibility:hidden;opacity:0;transition:opacity .12s;pointer-events:none}
+.runst-info:hover .runst-tip,.runst-info:focus-visible .runst-tip,.runst-info.open .runst-tip{visibility:visible;opacity:1}
+.grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr))}
+.pcard{padding:16px;overflow-wrap:anywhere}
+.pcard:hover{background:var(--hover)}
+.focus-project{display:block;position:relative;min-height:124px}
+.focus-project-link{display:flex;align-items:center;gap:12px;min-height:28px;color:var(--fg)}
+.focus-project-link::after{content:"";position:absolute;inset:0;border-radius:inherit}
+.focus-project:focus-within{border-color:var(--acc)}
+.focus-project-name{flex:1;min-width:0}
+.focus-project-arrow{color:var(--mut)}
+.focus-avatar{position:relative;flex:0 0 28px;height:28px;display:grid;place-items:center;overflow:hidden;border-radius:6px;background:var(--chip);color:var(--acc);font-size:12px}
+.focus-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--card)}
+.focus-project a:hover{text-decoration:underline}
+.focus-project-run{margin-top:10px}
+.focus-monitoring{display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:6px}
+.focus-monitor{display:inline-flex;align-items:center;gap:6px;padding:2px 7px;border:1px solid var(--bd);border-radius:5px;color:var(--mut);font-size:13px}
+.focus-monitor.is-configured{background:color-mix(in srgb,var(--ok) 9%,var(--card));color:var(--ok)}
+.focus-monitor.is-pending{background:color-mix(in srgb,var(--run) 10%,var(--card));color:var(--run)}
+.focus-monitor.is-configured::before,
+.focus-monitor.is-pending::before,
+.focus-monitor.is-disabled::before{content:"";width:6px;height:6px;border:1px solid currentColor;border-radius:50%}
+.focus-monitor.is-configured::before{background:currentColor}
+.focus-monitor.is-disabled::before{border-style:dashed}
+.focus-monitor.is-disabled{background:color-mix(in srgb,var(--mut) 9%,var(--card))}
+.focus-project-run a{position:relative;z-index:1}
+.typo3-overview th{white-space:nowrap}
+.typo3-overview td a{font-weight:600}
+.typo3-overview td{vertical-align:top}
+.focus-env-health{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.focus-env-health .hchip{gap:4px;padding:1px 8px;font-size:13px;cursor:default}
+.focus-env-health .hchip .ic{width:14px;height:14px}
+.focus-env-health .hchip.sev0{background:transparent;border-color:transparent;color:var(--mut);padding-inline:0}
+.overview-options{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.overview-options select{width:auto}
+.focus-row-number{display:table-cell;width:1%;color:var(--mut)}
+#view[data-pview] [data-secondary-copy]{display:none}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .chip{font-size:15px;padding:2px 8px;border-radius:10px;background:var(--chip);color:var(--mut)}
 .chip.ref{font-family:ui-monospace,Menlo,monospace;color:var(--fg)}
@@ -147,8 +198,6 @@ table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--bd);vertical-align:middle}
 th{color:var(--mut);font-weight:500;font-size:15px}
 .typo3-overview th{font-size:17px;font-weight:700}
-.focus-env-label,.focus-env-health{display:none}
-.overview-options,.focus-row-number{display:none}
 tr:last-child td{border-bottom:0}
 .wrap{overflow-x:auto}
 dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:16px}
@@ -247,13 +296,6 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 .tl ul{margin:4px 0 0;padding-left:18px;font-size:16px}
 
 [hidden]{display:none!important}   /* themes must not override the hidden attribute */
-.srvline{display:grid;grid-template-columns:auto auto auto 1fr;gap:3px 12px;align-items:center;font-size:15px;margin-top:10px;padding-top:8px;border-top:1px dashed var(--bd)}
-.srvline .h{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
-.srvline .env{font-size:13px;font-weight:700;padding:1px 6px;border-radius:6px;text-align:center}
-.srvline .env.prod{background:var(--acc);color:var(--acc-fg)}
-.srvline .env.stg{border:1px solid var(--acc);color:var(--acc)}
-.srvline .diff,.srvline .upd{color:var(--run);font-weight:700}
-.srvline:empty{display:none}
 .extupd{background:color-mix(in srgb,var(--acc) 12%,transparent)}
 .extupd.major{background:color-mix(in srgb,var(--run) 16%,transparent)}
 .srvlegend .upd,.srvlegend .diff{color:var(--run);font-weight:700}
@@ -294,31 +336,6 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 [data-style="focus"] .card,
 [data-style="focus"] .pcard{border-radius:8px}
 [data-style="focus"] .card{padding:20px;min-width:0}
-[data-style="focus"] .grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr))}
-[data-style="focus"] .pcard{padding:16px;overflow-wrap:anywhere}
-[data-style="focus"] .pcard:hover{background:var(--hover)}
-[data-style="focus"] .grid>a.pcard{display:none}
-[data-style="focus"] .focus-project{display:block;position:relative;min-height:124px}
-[data-style="focus"] .focus-project-link{display:flex;align-items:center;gap:12px;min-height:28px;color:var(--fg)}
-[data-style="focus"] .focus-project-link::after{content:"";position:absolute;inset:0;border-radius:inherit}
-[data-style="focus"] .focus-project:focus-within{border-color:var(--acc)}
-[data-style="focus"] .focus-project-name{flex:1;min-width:0}
-[data-style="focus"] .focus-project-arrow{color:var(--mut)}
-[data-style="focus"] .focus-avatar{position:relative;flex:0 0 28px;height:28px;display:grid;place-items:center;overflow:hidden;border-radius:6px;background:var(--chip);color:var(--acc);font-size:12px}
-[data-style="focus"] .focus-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--card)}
-[data-style="focus"] .focus-project a:hover{text-decoration:underline}
-[data-style="focus"] .focus-project-run{margin-top:10px}
-[data-style="focus"] .focus-monitoring{display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:6px}
-[data-style="focus"] .focus-monitor{display:inline-flex;align-items:center;gap:6px;padding:2px 7px;border:1px solid var(--bd);border-radius:5px;color:var(--mut);font-size:13px}
-[data-style="focus"] .focus-monitor.is-configured{background:color-mix(in srgb,var(--ok) 9%,var(--card));color:var(--ok)}
-[data-style="focus"] .focus-monitor.is-pending{background:color-mix(in srgb,var(--run) 10%,var(--card));color:var(--run)}
-[data-style="focus"] .focus-monitor.is-configured::before,
-[data-style="focus"] .focus-monitor.is-pending::before,
-[data-style="focus"] .focus-monitor.is-disabled::before{content:"";width:6px;height:6px;border:1px solid currentColor;border-radius:50%}
-[data-style="focus"] .focus-monitor.is-configured::before{background:currentColor}
-[data-style="focus"] .focus-monitor.is-disabled::before{border-style:dashed}
-[data-style="focus"] .focus-monitor.is-disabled{background:color-mix(in srgb,var(--mut) 9%,var(--card))}
-[data-style="focus"] .focus-project-run a{position:relative;z-index:1}
 [data-style="focus"] .fields{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
 [data-style="focus"] .chip,
 [data-style="focus"] .badge{border-radius:5px}
@@ -327,17 +344,6 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 [data-style="focus"] .btn.danger:hover:not(:disabled){background:var(--hover);filter:none}
 [data-style="focus"] th,
 [data-style="focus"] td{padding:10px 12px}
-[data-style="focus"] .typo3-overview th{white-space:nowrap}
-[data-style="focus"] .typo3-overview td a{font-weight:600}
-[data-style="focus"] .typo3-overview td{vertical-align:top}
-[data-style="focus"] .typo3-overview .overview-health,
-[data-style="focus"] .typo3-overview .overview-label{display:none}
-[data-style="focus"] .focus-env-label{display:inline}
-[data-style="focus"] .focus-env-health{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
-[data-style="focus"] .focus-env-health .sev0{background:transparent;color:var(--mut);padding-inline:0}
-[data-style="focus"] .overview-options{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
-[data-style="focus"] .overview-options select{width:auto}
-[data-style="focus"] .focus-row-number{display:table-cell;width:1%;color:var(--mut)}
 
 @media (max-width:820px){
   [data-style="focus"] header{position:static}
