@@ -475,6 +475,10 @@ table.checks td:nth-child(1),table.checks td:nth-child(2){white-space:nowrap}
 .hchip.sev-1{color:var(--run);background:color-mix(in srgb,var(--run) 14%,transparent);border-color:color-mix(in srgb,var(--run) 35%,transparent)}
 .hchip.sev0{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,transparent);cursor:default}
 .hchip.zero{opacity:.7}
+.hchip.upd{color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent);border-color:color-mix(in srgb,var(--acc) 35%,transparent)}
+.t3row-m .hchip{margin-left:8px;padding:1px 8px;font-size:13px;cursor:inherit;vertical-align:middle}
+.t3row-m .hchip .ic{width:14px;height:14px}
+.hchip.upd.major{color:var(--run);background:color-mix(in srgb,var(--run) 16%,transparent);border-color:color-mix(in srgb,var(--run) 35%,transparent)}
 button.hchip:hover{filter:brightness(1.15)}
 button.hchip:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .hchip .ic{width:16px;height:16px}
