@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T3 Watchdock command line: same commands as app.py (start, config, add-user, …).
+"""T3 Watchdock command line: runs app.py commands; without a command it lists them.
 
 Works from any directory and through a symlink (e.g. vendor/bin/t3-watchdock).
 """
@@ -7,7 +7,28 @@ import runpy
 import sys
 from pathlib import Path
 
+USAGE = """usage: t3-watchdock COMMAND
+
+Commands:
+  start [--no-watch]       start the app (--no-watch: TYPO3 release check paused)
+  add-user NAME            new login account (asks for the password)
+  set-password NAME        new password, signs the user out everywhere
+  remove-user NAME         delete account and its sessions
+  list-users               account names and creation dates
+  config get [KEY]         show settings
+  config set KEY JSON      change a setting, e.g. config set port 8788
+  config unset KEY         remove a setting
+  help                     this list"""
+COMMANDS = {"start", "add-user", "set-password", "remove-user", "list-users", "config"}
+
+args = sys.argv[1:]
+if not args or args[0] not in COMMANDS:
+    print(USAGE)
+    sys.exit(0 if not args or args[0] in ("help", "-h", "--help") else f"\nUnknown command: {args[0]}")
+if args[0] == "start":
+    args = args[1:]
+
 root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root))
-sys.argv[0] = str(root / "app.py")
+sys.argv = [str(root / "app.py"), *args]
 runpy.run_path(str(root / "app.py"), run_name="__main__")
