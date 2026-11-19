@@ -44,8 +44,17 @@ def _clean(value):
     return value
 
 
+def _clean_url(value):
+    """GitLab base URL entered in the Profile: https only, no user/password, query or fragment."""
+    url = (value or "").strip().rstrip("/")
+    u = urllib.parse.urlsplit(url)
+    if u.scheme != "https" or not u.hostname or u.username or u.password or u.query or u.fragment:
+        raise RuntimeError("GitLab URL must look like https://gitlab.example.com (https, no user, query or fragment)")
+    return url
+
+
 def token_status(user):
-    return {"own": bool(user and db.user_token(user))}
+    return {"own": bool(user and db.user_token(user)), "url": db.user_gitlab_url(user) if user else None}
 
 
 def token():
@@ -56,14 +65,23 @@ def token():
     return stored_token(user)
 
 
-def save_token(user, value):
-    db.user_token_set(user, crypto.encrypt(_clean(value)))
+def save_token(user, value, gitlab_url=None):
+    """Save token and/or GitLab URL. An empty token keeps the stored one (only the URL changes)."""
+    url = _clean_url(gitlab_url) if gitlab_url is not None else None
+    new_token = (value or "").strip()
+    if not new_token and not db.user_token(user):
+        raise RuntimeError("Token is empty or contains whitespace")
+    if new_token:
+        db.user_token_set(user, crypto.encrypt(_clean(value)))
+    if url is not None:
+        db.user_gitlab_url_set(user, url)
     _avatars.pop(user, None)
-    log(f"Personal GitLab token saved: {user}")
+    log(f"Personal GitLab {'token' if new_token else 'URL'} saved: {user}" + (f" ({url})" if url else ""))
 
 
 def delete_token(user):
     db.user_token_set(user, None)
+    db.user_gitlab_url_set(user, None)
     _avatars.pop(user, None)
     log(f"Personal GitLab token removed: {user}")
 
@@ -82,10 +100,14 @@ def legacy_token_files():
             log(f"{f} is no longer used (every user has an own token in Profile); delete it")
 
 
-def _main_host():
-    """GitLab of the first project (or gitlab.gingco.de): where tokens are tested and the profile is read."""
-    projects = config()["projects"]
-    return (projects[0]["gitlab_url"] if projects else "https://gitlab.gingco.de").rstrip("/")
+DEFAULT_GITLAB = "https://gitlab.gingco.de"      # same default as the GitLab URL field in the Profile
+
+
+def _main_host(user=None):
+    """Where a user's token is tested and the profile is read: the GitLab URL from the user's Profile,
+    else the default (what the Profile field shows when nothing is saved)."""
+    own = user and db.user_gitlab_url(user)
+    return (own or DEFAULT_GITLAB).rstrip("/")
 
 
 AVATAR_TTL = 3600
@@ -97,7 +119,7 @@ def own_avatar(user):
     hit = _avatars.get(user)
     if hit and time.time() - hit[0] < AVATAR_TTL:
         return hit[1]
-    url, avatar = _main_host(), None
+    url, avatar = _main_host(user), None
     if db.user_token(user):
         try:
             req = urllib.request.Request(url + "/api/v4/user", headers={"PRIVATE-TOKEN": stored_token(user)})
@@ -111,8 +133,8 @@ def own_avatar(user):
 
 
 def test_token(user):
-    """Check the user's own token against GitLab of the first project (or gitlab.gingco.de)."""
-    url = _main_host()
+    """Check the user's own token against the user's GitLab URL (see _main_host)."""
+    url = _main_host(user)
     req = urllib.request.Request(url + "/api/v4/user", headers={"PRIVATE-TOKEN": stored_token(user)})
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
