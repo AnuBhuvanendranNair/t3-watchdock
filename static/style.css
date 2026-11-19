@@ -660,6 +660,53 @@ p.pf-note.full{margin-top:-8px}
 .pf-check{display:flex;align-items:center;gap:10px;margin:0;color:var(--mut);cursor:pointer}
 .pf-check input{width:16px;height:16px;flex:none;margin:0}
 .pf-check b{color:var(--fg);font-weight:600}
+.sched{max-width:1200px;margin:0 auto}
+.sched-head{padding:24px 0 32px;border-bottom:1px solid var(--bd)}
+.sched-head h1{margin:0}
+.sched-head p{margin:10px 0 0;color:var(--mut);font-size:15px}
+.sched-task{border-bottom:1px solid var(--bd)}
+.sched-row{display:grid;grid-template-columns:32px minmax(0,1fr) 240px auto auto 32px;align-items:center;gap:12px 16px;padding:24px 0}
+.sched-name h2{font-size:16px;margin:0}
+.sched-name p{margin:2px 0 0;font-size:14px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-status{font-size:14px;line-height:1.4}
+.sched-next{color:var(--mut)}
+.sched-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--mut);margin-right:8px;vertical-align:1px}
+.sched-dot.ok{background:var(--ok)}.sched-dot.err{background:var(--err)}.sched-dot.warn{background:var(--run)}
+.sched-err{color:var(--err)}
+.sched-run{white-space:nowrap}
+.sched-chev{width:32px;height:32px;border:0;border-radius:6px;background:none;color:var(--mut);cursor:pointer;display:grid;place-items:center}
+.sched-chev:hover{background:var(--hover);color:var(--fg)}
+.sched-chev .ic{transition:transform .15s}
+.sched-chev[aria-expanded="true"] .ic{transform:rotate(180deg)}
+.sched-chev:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.sched-panel{margin:0 0 24px 48px;padding:20px;border-radius:12px;background:var(--card);display:flex;flex-direction:column;gap:14px}
+.sched-panel[hidden]{display:none}
+.sched-panel .pf-subhead{margin:0}
+.sched-sum{margin:0;font-weight:600}
+.sched-fails{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.sched-fails li{padding:8px 12px;border-radius:6px;background:color-mix(in srgb,var(--err) 10%,transparent);font-size:14px}
+.sched-fails li span{color:var(--mut);margin-left:6px}
+.sched-mode{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.sched-seg{display:inline-flex;padding:4px;border-radius:8px;background:var(--bg);border:1px solid var(--bd)}
+.sched-seg label{position:relative;margin:0;cursor:pointer}
+.sched-seg input{position:absolute;opacity:0;width:1px;height:1px}
+.sched-seg span{display:block;padding:6px 14px;border-radius:6px;font-size:14px;font-weight:600;color:var(--mut)}
+.sched-seg input:checked+span{background:var(--acc);color:var(--acc-fg)}
+.sched-seg input:focus-visible+span{outline:2px solid var(--acc);outline-offset:1px}
+.sched-inline{display:flex;align-items:center;gap:8px;margin:0;color:var(--mut);font-size:14px}
+.sched-inline[hidden]{display:none}
+.sched-inline input{width:auto}
+.sched-inline input[type=number]{width:90px}
+.sched-days{display:flex;gap:8px;flex-wrap:wrap}
+.sched-days[hidden]{display:none}
+.sched-days label{position:relative;margin:0;cursor:pointer}
+.sched-days input{position:absolute;opacity:0;width:1px;height:1px}
+.sched-days span{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--bd);color:var(--mut);font-size:14px;font-weight:600}
+.sched-days input:checked+span{background:var(--acc);border-color:var(--acc);color:var(--acc-fg)}
+.sched-days input:focus-visible+span{outline:2px solid var(--acc);outline-offset:2px}
+.sched-panel .actions{display:flex;justify-content:flex-end;margin:0}
+@media (max-width:820px){.sched-row{grid-template-columns:32px minmax(0,1fr) auto;padding:20px 0}
+  .sched-status{grid-column:2/-1}.sched-row .switch{grid-column:2;justify-self:start}.sched-panel{margin-left:0}}
 .pf-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 .pf-tile{padding:12px 16px;border-radius:8px;background:var(--chip)}
 .pf-tile span{display:block;font-size:13px;color:var(--mut)}

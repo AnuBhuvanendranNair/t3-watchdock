@@ -1366,46 +1366,81 @@ async function saveEmail(extra) {
   await refresh(); viewSettings();
 }
 
+// Scheduler: one row per task (status, on/off, run now); the chevron opens last result + schedule.
+const SCHED_ICONS = {typo3_release: "tag", t3monitor: "activity", security: "shield", typo3_news: "bell"};
+const schedOpen = new Set();
+function relTime(iso) {   // "today 12:06", "yesterday 16:22", "tomorrow 07:00", else "18 Nov 16:22"
+  if (!iso) return "–";
+  const d = new Date(iso); if (isNaN(d)) return fmt(iso);
+  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(d) - day(new Date())) / 864e5);
+  const hm = d.toLocaleTimeString("en-GB", {hour: "2-digit", minute: "2-digit"});
+  const word = {"-1": "yesterday", 0: "today", 1: "tomorrow"}[diff];
+  return `${word || d.toLocaleDateString("en-GB", {day: "numeric", month: "short"})} ${hm}`;
+}
+function schedResult(r) {   // "21/24 OK. A: msg | B: msg" -> summary + one row per failure; other results as text
+  if (!r) return "";
+  const cut = m => /<(!doctype|html|head|body)\b/i.test(m) ? m.replace(/:?\s*<[\s\S]*$/, "") + " (HTML page instead of data)" : m.length > 240 ? m.slice(0, 240) + "…" : m;
+  const x = /^(\d+)\/(\d+) OK\.?\s*([\s\S]*)$/.exec(r);
+  if (!x) return `<p class="sched-sum">${esc(cut(r))}</p>`;
+  const rows = x[3] ? x[3].split(" | ").map(it => { const i = it.indexOf(": ");
+    return i < 0 ? `<li>${esc(cut(it))}</li>` : `<li><b>${esc(it.slice(0, i))}</b> <span>${esc(cut(it.slice(i + 2)))}</span></li>`; }) : [];
+  return `<p class="sched-sum">${x[1]} of ${x[2]} projects OK</p>${rows.length ? `<ul class="sched-fails">${rows.join("")}</ul>` : ""}`;
+}
 function viewScheduler() {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   $("#view").innerHTML = `
-    <div class="head"><div><h1>Scheduler</h1><div class="sub" data-secondary-copy>Automatic tasks; they run while the launcher runs. A run missed while it was off starts right after the next start.</div></div></div>
-    <div class="stack scheduler-tasks">${S.scheduler.map(t => { const c = t.cfg; return `
-      <form class="card scheduler-task" data-task="${esc(t.id)}">
-        <div class="head scheduler-task-heading" style="margin-bottom:8px"><div><h2 style="margin:0">${esc(t.name)}</h2><div class="sub" data-secondary-copy>${esc(t.description)}</div></div>
-          <button class="btn sec sm" type="button" data-act="schedrun" data-id="${esc(t.id)}" ${t.running ? "disabled" : ""}>${t.running ? "Running…" : "▶ Run now"}</button></div>
-        <dl class="scheduler-status" style="margin-bottom:14px">
-          <dt>Status</dt><dd>${t.blocked ? `<span class="sev-1">paused (launcher started with --no-watch)</span>` : c.enabled ? `<span class="sev0">active</span> · ${esc(t.schedule)}` : `<span class="sev--1">off</span>`}</dd>
-          <dt>Last run</dt><dd>${t.last_run ? `${esc(fmt(t.last_run))} · <span class="${t.ok ? "sev0" : "sev-2"}">${t.ok ? "OK" : "failed"}</span>` : "never"}</dd>
-          ${t.result ? `<dt>Result</dt><dd>${esc(t.result)}</dd>` : ""}
-          <dt>Next run</dt><dd>${t.next_run && !t.blocked ? esc(fmt(t.next_run)) : "–"}</dd>
-        </dl>
-        <label class="check scheduler-enabled"><input type="checkbox" name="enabled" ${c.enabled ? "checked" : ""}> Enabled</label>
-        <div class="fields scheduler-fields" style="margin-top:12px">
-          <div><label for="mode-${esc(t.id)}">Schedule</label><select id="mode-${esc(t.id)}" name="mode">
-            <option value="interval" ${c.mode === "interval" ? "selected" : ""}>Every N hours</option>
-            <option value="daily" ${c.mode === "daily" ? "selected" : ""}>Daily at a fixed time</option></select></div>
-          <div data-for="interval"><label for="hours-${esc(t.id)}">Every (hours)</label><input id="hours-${esc(t.id)}" name="hours" type="number" min="0.25" max="168" step="0.25" value="${esc(c.hours)}"></div>
-          <div data-for="daily"><label for="time-${esc(t.id)}">Time</label><input id="time-${esc(t.id)}" name="time" type="time" value="${esc(c.time)}"></div>
+    <div class="sched">
+      <div class="sched-head"><h1>Scheduler</h1><p>Tasks run while the launcher runs. A run missed while it was off starts right after the next start.</p></div>
+      ${S.scheduler.map(t => { const c = t.cfg, id = esc(t.id), open = schedOpen.has(t.id);
+        const st = t.blocked ? `<span class="sched-dot warn"></span>Paused (started with --no-watch)`
+          : !t.last_run ? `<span class="sched-dot"></span>Never run`
+          : `<span class="sched-dot ${t.ok ? "ok" : "err"}"></span><span class="${t.ok ? "" : "sched-err"}">${t.ok ? "OK" : "Failed"} · ${esc(relTime(t.last_run))}</span>`;
+        return `
+      <form class="sched-task" data-task="${id}">
+        <div class="sched-row">
+          <span class="pf-sec-ic">${ic(SCHED_ICONS[t.id] || "clock")}</span>
+          <div class="sched-name"><h2>${esc(t.name)}</h2><p title="${esc(t.description)}">${esc(t.description)}</p></div>
+          <div class="sched-status"><div>${st}</div><div class="sched-next">${c.enabled && !t.blocked && t.next_run ? `Next ${esc(relTime(t.next_run))}` : c.enabled ? "–" : "Off"}</div></div>
+          <input type="checkbox" class="switch" role="switch" name="enabled" aria-label="${esc(t.name)} on/off" ${c.enabled ? "checked" : ""}>
+          <button class="btn sec sched-run" type="button" data-act="schedrun" data-id="${id}" ${t.running ? "disabled" : ""}>${t.running ? "Running…" : `${ic("play", "sm")} Run now`}</button>
+          <button class="sched-chev" type="button" aria-expanded="${open}" aria-controls="sp-${id}" aria-label="Details and schedule">${ic("chev")}</button>
         </div>
-        <div class="scheduler-days" data-for="daily" style="margin-top:12px" role="group" aria-labelledby="days-${esc(t.id)}"><div class="scheduler-days-label" id="days-${esc(t.id)}">Weekdays</div><div class="actions">
-          ${days.map((d, i) => `<label class="check"><input type="checkbox" name="day" value="${i}" ${c.days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div></div>
-        <div class="actions scheduler-save" style="margin-top:14px"><button class="btn" type="submit">Save</button><button class="btn sec" type="submit" data-close="1">Save &amp; close</button></div>
+        <div class="sched-panel" id="sp-${id}" ${open ? "" : "hidden"}>
+          ${t.result ? `<div class="pf-subhead">Last result</div>${schedResult(t.result)}<hr class="pf-hr">` : ""}
+          <div class="pf-subhead">Schedule</div>
+          <div class="sched-mode">
+            <div class="sched-seg" role="radiogroup" aria-label="Schedule type">
+              <label><input type="radio" name="mode" value="interval" ${c.mode === "interval" ? "checked" : ""}><span>Every N hours</span></label>
+              <label><input type="radio" name="mode" value="daily" ${c.mode === "daily" ? "checked" : ""}><span>Daily</span></label></div>
+            <label class="sched-inline" data-for="interval">every <input name="hours" type="number" min="0.25" max="168" step="0.25" value="${esc(c.hours)}" aria-label="Hours"> h</label>
+            <label class="sched-inline" data-for="daily">at <input name="time" type="time" value="${esc(c.time)}" aria-label="Time"></label>
+          </div>
+          <div class="sched-days" data-for="daily" role="group" aria-label="Weekdays">
+            ${days.map((d, i) => `<label title="${d}"><input type="checkbox" name="day" value="${i}" ${c.days.includes(i) ? "checked" : ""}><span>${d[0]}</span></label>`).join("")}</div>
+          <div class="actions"><button class="btn" type="submit">Save</button></div>
+        </div>
       </form>`; }).join("")}
     </div>`;
   viewScheduler.dirty = false;
   document.querySelectorAll("form[data-task]").forEach(f => {
-    f.oninput = () => viewScheduler.dirty = true;
-    const sync = () => f.querySelectorAll("[data-for]").forEach(el => el.hidden = el.dataset.for !== f.mode.value);
-    f.mode.onchange = sync; sync();
-    f.onsubmit = async ev => {
-      ev.preventDefault();
+    const save = async (msg) => {
       try {
         await api("/api/scheduler", {id:f.dataset.task, enabled:f.enabled.checked, mode:f.mode.value, hours:f.hours.value,
           time:f.time.value, days:[...f.querySelectorAll("[name=day]:checked")].map(x => Number(x.value))});
-        await refresh(); toast("Schedule saved"); if (!closeAfter(ev)) viewScheduler();
+        await refresh(); toast(msg); viewScheduler();
       } catch (e) { toast(e.message, true); }
     };
+    f.oninput = () => viewScheduler.dirty = true;
+    const sync = () => f.querySelectorAll("[data-for]").forEach(el => el.hidden = el.dataset.for !== f.mode.value);
+    f.querySelectorAll("[name=mode]").forEach(r => r.onchange = sync); sync();
+    f.enabled.onchange = () => save(f.enabled.checked ? "Task switched on" : "Task switched off");
+    f.querySelector(".sched-chev").onclick = ev => {
+      const b = ev.currentTarget, panel = f.querySelector(".sched-panel"), open = panel.hidden;
+      panel.hidden = !open; b.setAttribute("aria-expanded", String(open));
+      open ? schedOpen.add(f.dataset.task) : schedOpen.delete(f.dataset.task);
+    };
+    f.onsubmit = ev => { ev.preventDefault(); save("Schedule saved"); };
   });
 }
 
@@ -1542,7 +1577,7 @@ const actions = {
   async schedrun(el) {
     el.disabled = true; el.textContent = "Running…";
     try { const r = await api("/api/scheduler/run", {id:el.dataset.id}); await refresh(); viewScheduler(); toast(r.result, !r.ok); }
-    catch (e) { toast(e.message, true); el.disabled = false; el.textContent = "▶ Run now"; }
+    catch (e) { toast(e.message, true); el.disabled = false; el.innerHTML = `${ic("play", "sm")} Run now`; }
   },
   async updsend(el) {
     el.disabled = true;
@@ -1636,7 +1671,7 @@ const TOUR = [
   {route: firstProject, el: "#view .pipe-env", title: "Pipelines", text: "Start a pipeline per environment with ▶. The current pipeline and its jobs appear here; production can be promoted after a successful staging pipeline."},
   {route: firstProject, el: '#view .head a[href$="/edit"]', title: "Edit project", text: "Branches, variables, auto-play jobs, TYPO3 auto-update, monitoring, and the responsible person shown on the card."},
   {route: "#/activity", el: "#view .card", title: "Activity", text: "All pipeline runs started from Watchdock and the activity log."},
-  {route: "#/scheduler", el: "#view .card", title: "Scheduler", text: "Automatic tasks such as the TYPO3 release check: interval or daily time, or run now. Automatic TYPO3 update pipelines run with the token of each project's responsible person."},
+  {route: "#/scheduler", el: "#view .sched-task", title: "Scheduler", text: "Automatic tasks such as the TYPO3 release check: interval or daily time, or run now. Automatic TYPO3 update pipelines run with the token of each project's responsible person."},
   {route: "#/settings", el: cardTitled("Microsoft Teams"), title: "Settings", text: "Teams and email notifications, project export / import and the TYPO3 release check."},
   {route: "#/profile", el: cardWith("#gtform"), title: "Your GitLab token", text: "Save your personal access token (scope api) here. It is stored encrypted and never shown again."},
   {route: "#/profile", el: cardWith("#apform"), title: "Appearance", text: "Theme and style, saved in this browser."},
