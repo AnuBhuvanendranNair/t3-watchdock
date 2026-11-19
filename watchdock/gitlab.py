@@ -1,6 +1,6 @@
-"""GitLab API: token, pipelines, manual jobs, project lookup."""
+"""GitLab API: tokens (per user + service token, encrypted), pipelines, manual jobs, project lookup."""
+import contextvars
 import json
-import os
 import re
 import threading
 import time
@@ -9,41 +9,103 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+from . import crypto, db
 from .core import FINAL_STATUSES, TOKEN_FALLBACK, TOKEN_FILE, config, log, now, stop_event
 from .db import last_pipelines, run_add
 
 
-# ---------------------------------------------------------------- GitLab
-def token_source():
-    for name, f in (("app", TOKEN_FILE), ("home", TOKEN_FALLBACK)):
-        if f.exists() and f.read_text(encoding="utf-8").strip():
-            return name, f
-    return None, None
+# ---------------------------------------------------------------- GitLab tokens
+# Browser requests use the token of the signed-in user, so GitLab shows who started a pipeline or job.
+# Reads (GET) fall back to the service token when the user has none; writes (pipelines, jobs) never do.
+# Background work (scheduler, TYPO3 watcher, mail watches) runs without a user and uses the service token.
+SERVICE = "gitlab_service_token"
+_user = contextvars.ContextVar("gitlab_user", default=None)
 
 
-def token():
-    _, f = token_source()
-    if not f:
-        raise RuntimeError("No GitLab token stored. Add it in the app (GitLab token section).")
-    return f.read_text(encoding="utf-8").strip()
+def set_user(name):
+    """Called for every browser request (None for requests without a session)."""
+    _user.set(name)
 
 
-def save_token(value):
+def _clean(value):
     value = (value or "").strip()
     if not value or any(c.isspace() for c in value):
         raise RuntimeError("Token is empty or contains whitespace")
-    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(value)
-    os.chmod(TOKEN_FILE, 0o600)
-    log("GitLab token saved in app folder")
+    return value
 
 
-def test_token():
-    """Check token against GitLab of the first project (or gitlab.gingco.de)."""
+def token_status(user):
+    return {"own": bool(user and db.user_token(user)), "service": db.secret_get(SERVICE) is not None}
+
+
+def token(write=False):
+    user = _user.get()
+    if user:
+        own = db.user_token(user)
+        if own:
+            return crypto.decrypt(own)
+        if write:
+            raise RuntimeError("No personal GitLab token stored. Add yours under Profile → GitLab token.")
+    svc = db.secret_get(SERVICE)
+    if svc:
+        return crypto.decrypt(svc)
+    raise RuntimeError("No GitLab token stored. Add your own under Profile → GitLab token"
+                       + ("." if user else "; an admin adds the service token in Settings."))
+
+
+def save_token(user, value):
+    """user: own token of that user; None: service token."""
+    enc = crypto.encrypt(_clean(value))
+    if user:
+        db.user_token_set(user, enc)
+        log(f"Personal GitLab token saved: {user}")
+    else:
+        db.secret_set(SERVICE, enc)
+        log("GitLab service token saved")
+
+
+def delete_token(user):
+    if user:
+        db.user_token_set(user, None)
+        log(f"Personal GitLab token removed: {user}")
+    else:
+        db.secret_set(SERVICE, None)
+        log("GitLab service token removed")
+
+
+def stored_token(user):
+    """Decrypted own token (user) or service token (None); raises if none is stored."""
+    enc = db.user_token(user) if user else db.secret_get(SERVICE)
+    if not enc:
+        raise RuntimeError("No personal GitLab token stored" if user else "No GitLab service token stored")
+    return crypto.decrypt(enc)
+
+
+def import_token_files():
+    """One-time move of the former plaintext token files into the encrypted service token.
+
+    The app-folder file is deleted once its value is stored encrypted; ~/.gitlab-token belongs to the user
+    and is left in place (only read when no service token exists yet)."""
+    for f in (TOKEN_FILE, TOKEN_FALLBACK):
+        try:
+            value = f.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            continue
+        if not value:
+            continue
+        if db.secret_get(SERVICE) is None:
+            save_token(None, value)
+            log(f"GitLab token from {f} imported as the encrypted service token")
+        if f == TOKEN_FILE and stored_token(None) == value:
+            f.unlink()
+            log(f"Plaintext token file removed: {f}")
+
+
+def test_token(user):
+    """Check the own (user) or service (None) token against GitLab of the first project (or gitlab.gingco.de)."""
     projects = config()["projects"]
     url = (projects[0]["gitlab_url"] if projects else "https://gitlab.gingco.de").rstrip("/")
-    req = urllib.request.Request(url + "/api/v4/user", headers={"PRIVATE-TOKEN": token()})
+    req = urllib.request.Request(url + "/api/v4/user", headers={"PRIVATE-TOKEN": stored_token(user)})
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             return f"Token valid for user '{json.load(r).get('username')}' on {url}"
@@ -58,7 +120,7 @@ def gitlab(project, method, path, body=None):
            + urllib.parse.quote(project["path"], safe="") + path)
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
-        "PRIVATE-TOKEN": token(), "Content-Type": "application/json"})
+        "PRIVATE-TOKEN": token(write=method != "GET"), "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             raw = r.read()
@@ -67,7 +129,7 @@ def gitlab(project, method, path, body=None):
         if e.code == 401:
             raise RuntimeError(
                 "GitLab denied access. Connect to your VPN and try again. "
-                "If you’re already connected, check your GitLab token in Settings."
+                "If you’re already connected, check your GitLab token in your Profile."
             ) from None
         detail = e.read().decode(errors="replace")[:500]
         if detail.lstrip().startswith("<"):          # HTML error page (proxy/auth) -> status only
@@ -118,9 +180,11 @@ def run_pipeline(project, variables, trigger, play_jobs=(), ref=None):
     p = gitlab(project, "POST", "/pipeline", body)
     run_add({"t": now(), "project": project["id"], "pipeline": p["id"],
              "web_url": p.get("web_url"), "trigger": trigger, "ref": ref})
-    log(f"Pipeline #{p['id']} started: {project['path']} @ {ref} ({trigger})")
+    who = f" by {_user.get()}" if _user.get() else ""
+    log(f"Pipeline #{p['id']} started: {project['path']} @ {ref} ({trigger}){who}")
     if play_jobs:
-        threading.Thread(target=auto_play, args=(project, p["id"], list(play_jobs)), daemon=True).start()
+        ctx = contextvars.copy_context()           # manual jobs are played with the same user's token
+        threading.Thread(target=ctx.run, args=(auto_play, project, p["id"], list(play_jobs)), daemon=True).start()
     return p
 
 
@@ -241,5 +305,7 @@ def last_run_status():
     if not last:
         return {}
     with ThreadPoolExecutor(max_workers=6) as ex:
-        res = dict(zip(last, ex.map(lambda pid: _run_status(projects[pid], last[pid]), last)))
+        # each task gets a copy of this request's context: the signed-in user's token is used
+        futs = {pid: ex.submit(contextvars.copy_context().run, _run_status, projects[pid], last[pid]) for pid in last}
+        res = {pid: f.result() for pid, f in futs.items()}
     return {pid: {"pipeline": last[pid], **res[pid]} for pid in last}
