@@ -21,7 +21,8 @@ Python web app ([Flask](https://flask.palletsprojects.com), served by [Gunicorn]
 
 ## Features
 
-- **Login** — named user accounts, managed on the command line (`bin/t3-watchdock add-user NAME`); every page and API call needs a session (see *Login*)
+- **Login** — named user accounts, managed on the command line (`bin/t3-watchdock add-user NAME`); every page and API call needs a session; admins are set with `set-admin NAME on` (see *Login*)
+- **GitLab token per user** — everyone saves their own token in *Profile*, so GitLab shows who started a pipeline; a service token (admin only) covers scheduler and watcher; all tokens stored encrypted (see *GitLab tokens*)
 - **Project list** — GitLab projects (path + branch) managed in the UI, stored in the SQLite database `watchdock.db`
 - **Project form pre-fill** — new projects start with defaults (staging/production, `build:main`, TYPO3 13, `TARGET_TASK_NAME=shup01`); branch, production branch and TYPO3 major are select boxes; when GitLab is reachable, project path search plus name, branches, manual jobs (CI lint) and TYPO3 major are read from GitLab
 - **Export / import projects** — *Settings → Export / import projects* writes all projects including their t3monitor keys and Basic auth passwords to one JSON file and reads such a file again (existing projects are skipped unless *Overwrite* is ticked). The GitLab token, Teams webhook URL and SMTP password are never exported
@@ -122,10 +123,11 @@ bin/t3-watchdock gen-secret-key       # print a new key for WATCHDOCK_SECRET_KEY
 - **Sessions:** 12 hours from sign-in (no extension on activity). *Sign out NAME* in the header ends the session.
 - **Account lock:** 3 failed logins in a row lock the account; also the correct password is then refused. Only `unlock-user NAME` or `set-password NAME` on the command line unlock it. A successful login resets the count. Lock and unlock are written to the log.
 - **Failed logins per address:** 5 failures per client address (any name) within 15 minutes block that address for the rest of the window (in memory, reset on restart). Behind a reverse proxy all requests come from the proxy address, so the limit then applies to everyone together.
-- **Profile** (user icon in the header, `#/profile`): full name and email (optional, stored with the account; login name read-only), and change your own password in the browser. Needs the current password; your other sessions are signed out, the current one stays. A wrong current password counts as a failed login (3 lock the account).
+- **Profile** (user icon in the header, `#/profile`): your GitLab picture (with your own token stored), full name and email (optional, stored with the account; login name read-only), *Appearance* (theme and style, saved per browser), your own GitLab token (see *GitLab tokens*), and change your own password in the browser. Needs the current password; your other sessions are signed out, the current one stays. A wrong current password counts as a failed login (3 lock the account).
 - A locked account is also signed out everywhere.
+- **Admins:** `set-admin NAME on|off` on the command line. Only admins can save, test or remove the GitLab service token (*Settings*); everything else is the same for all users. New and existing accounts start without admin rights.
 - Logins and logouts are written to the log (*Activity*) with the user name.
-- **After updating** an existing instance: the database gets the `users` and `sessions` tables automatically on start, but no account. Run `add-user` once, otherwise nobody can sign in (also not the Patchday browser extension, which uses the signed-in Watchdock tab).
+- **After updating** an existing instance: the database gets the `users` and `sessions` tables automatically on start, but no account. Run `add-user` once, otherwise nobody can sign in (also not the Patchday browser extension, which uses the signed-in Watchdock tab). Since the per-user GitLab tokens (schema version 6): create the secret key first (see *Quick start*), make at least one user admin with `set-admin NAME on`, and let every user save their own token in *Profile*.
 
 ## Configuration
 
@@ -310,7 +312,7 @@ Notes:
 - Stop any copy of `app.py` running in a terminal first (same port).
 - macOS notifications (TYPO3 auto-trigger) do not work inside the container; use Teams notifications or the Activity log instead.
 - HTTPS is done by Traefik only; the app itself serves plain HTTP (the former `LAUNCHER_TLS_*` settings are gone).
-- Environment: `LAUNCHER_DATA` (data folder, default: app folder), `LAUNCHER_HOST` (bind address, default `127.0.0.1`), `LAUNCHER_ALLOWED_HOSTS` (extra accepted hostnames, comma-separated), `LAUNCHER_BEHIND_PROXY` (`1` = trust `X-Forwarded-*`, see above).
+- Environment: `LAUNCHER_DATA` (data folder, default: app folder), `LAUNCHER_HOST` (bind address, default `127.0.0.1`), `LAUNCHER_ALLOWED_HOSTS` (extra accepted hostnames, comma-separated), `LAUNCHER_BEHIND_PROXY` (`1` = trust `X-Forwarded-*`, see above), `WATCHDOCK_SECRET_KEY` / `WATCHDOCK_SECRET_KEY_FILE` (key that encrypts the GitLab tokens, see *GitLab tokens*).
 
 ## Icons
 
@@ -371,7 +373,7 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 - Optional HTTPS with a local mkcert certificate
 - `Host` header check against DNS rebinding
 - `Origin` check and `application/json` requirement on POST against cross-site requests
-- GitLab tokens are stored encrypted in the database, the key outside the data folder (see *GitLab tokens*). Other secrets (Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form; the project export file contains t3monitor keys and Basic auth passwords in plain text. Both work only on a same-origin HTTPS or localhost request
+- GitLab tokens are stored encrypted in the database, the key outside the data folder (see *GitLab tokens*). Pipelines and jobs started in the browser use the signed-in user's own token; only admins can change the service token; a user's GitLab picture is read with that user's own token only. Other secrets (Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form; the project export file contains t3monitor keys and Basic auth passwords in plain text. Both work only on a same-origin HTTPS or localhost request
 - Token, secrets, config, state, t3monitor history and logs are gitignored
 - Outgoing connections: GitLab (only to the GitLab URLs of configured projects), `get.typo3.org`, `news.typo3.com` (security feed), the Teams webhook / SMTP server if enabled, the t3monitor site URLs, `repo.packagist.org` (only public Composer package names are sent), and — when a changelog is opened — `api.github.com`, `raw.githubusercontent.com` or `gitlab.com` (public repository paths and tags only)
 
