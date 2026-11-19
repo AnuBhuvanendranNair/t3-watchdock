@@ -1107,55 +1107,83 @@ function viewActivity() {
 
 function viewSettings() {
   const m = S.email;
+  const rel = S.scheduler.find(t => t.id === "typo3_release");
+  const latest = Object.entries(S.typo3_latest || {}).sort((x, y) => Number(y[0]) - Number(x[0]));
   $("#view").innerHTML = `
-    <div class="head"><h1>Settings</h1></div>
-    <div class="stack">
-      <div class="card"><h2>Microsoft Teams notifications</h2>
-        <p class="sub" style="margin:0 0 12px" data-secondary-copy>Posts a message to a Teams channel when a pipeline started automatically by the TYPO3 watcher has finished (or could not be started).</p>
-        ${!S.teams_url_set ? `<p class="sub">Create the webhook in Teams: channel → ⋯ → Workflows → "Post to a channel when a webhook request is received".</p>` : ""}
-        <form id="msform" class="stack">
-          <label class="check"><input type="checkbox" name="enabled" ${S.teams.enabled ? "checked" : ""}> Send Teams messages</label>
-          <div class="fields">
-            <div><label>Webhook URL</label><input name="url" type="password" autocomplete="off"
-              placeholder="${S.teams_url_set ? "stored – leave empty to keep" : "https://…"}"></div>
-          </div>
-          <div class="actions"><button class="btn" type="submit">Save</button><button class="btn sec" type="submit" data-close="1">Save &amp; close</button>
-            <button class="btn sec" type="button" data-act="teamstest">Save &amp; send test message</button>
-            ${S.teams_url_set ? `<button class="btn danger" type="button" data-act="teamsdel">Remove URL</button>` : ""}</div>
-        </form></div>
-      <div class="card"><h2>Email notifications</h2>
-        <p class="sub" style="margin:0 0 12px" data-secondary-copy>Sends an email when a pipeline started automatically by the TYPO3 watcher has finished (or could not be started).</p>
-        <form id="eform" class="stack">
-          <label class="check"><input type="checkbox" name="enabled" ${m.enabled ? "checked" : ""}> Send email notifications</label>
-          <div class="fields">
-            <div><label>SMTP host</label><input name="host" value="${esc(m.host)}" placeholder="smtp.example.com"></div>
-            <div><label>Port</label><input name="port" type="number" min="1" max="65535" value="${esc(m.port)}"></div>
-            <div><label>Security</label><select name="security">${[["starttls", "STARTTLS"], ["ssl", "SSL/TLS"], ["none", "None"]]
+    <div class="profile stack">
+      <h1 class="pf-title">Settings</h1>
+      ${pfSec("chat", "Microsoft Teams", "Notifications via incoming webhook", `
+        <form id="msform" class="pf-form">
+          <label class="pf-toggle full"><span>Send Teams messages</span><input type="checkbox" class="switch" role="switch" name="enabled" ${S.teams.enabled ? "checked" : ""}></label>
+          <div class="full"><label for="ms-url">Webhook URL</label>
+            <div class="${S.teams_url_set ? "pf-field-dot" : ""}">${S.teams_url_set ? `<span class="pf-dot" aria-hidden="true"></span>` : ""}<input id="ms-url" name="url" type="password" autocomplete="off"
+              placeholder="${S.teams_url_set ? "Stored. Paste a new URL to replace it." : "https://…"}"></div>
+            ${!S.teams_url_set ? `<p class="pf-note">Create it in Teams: channel → ⋯ → Workflows → “Post to a channel when a webhook request is received”.</p>` : ""}</div>
+          <div class="actions">${S.teams_url_set ? `<button class="pf-link danger" type="button" data-act="teamsdel">Remove URL</button>` : ""}
+            <span class="pf-spacer"></span>
+            <button class="btn sec" type="button" data-act="teamstest" title="Saves, then sends a test message">Send test message</button>
+            <button class="btn" type="submit">Save</button></div>
+        </form>`)}
+      ${pfSec("mail", "Email", "Notifications via your SMTP server", `
+        <form id="eform" class="pf-form">
+          <label class="pf-toggle full"><span>Send email notifications</span><input type="checkbox" class="switch" role="switch" name="enabled" ${m.enabled ? "checked" : ""}></label>
+          <div class="pf-subhead full">Server</div>
+          <div class="pf-row r3 full">
+            <div><label for="em-host">SMTP host</label><input id="em-host" name="host" value="${esc(m.host)}" placeholder="smtp.example.com"></div>
+            <div><label for="em-port">Port</label><input id="em-port" name="port" type="number" min="1" max="65535" value="${esc(m.port)}"></div>
+            <div><label for="em-sec">Security</label><select id="em-sec" name="security">${[["starttls", "STARTTLS"], ["ssl", "SSL/TLS"], ["none", "None"]]
               .map(([k, l]) => `<option value="${k}" ${m.security === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-            <div><label>SMTP user (empty = no login)</label><input name="user" value="${esc(m.user)}" autocomplete="off"></div>
-            <div><label>SMTP password</label><input name="password" type="password" autocomplete="new-password"
-              placeholder="${S.email_password_set ? "stored – leave empty to keep" : "not stored"}"></div>
-            <div><label>Sender</label><input name="from" value="${esc(m.from)}" placeholder="launcher@example.com"></div>
-            <div><label>Recipients (comma-separated)</label><input name="to" value="${esc(m.to.join(", "))}" placeholder="a@example.com, b@example.com"></div>
           </div>
-          <div class="actions"><button class="btn" type="submit">Save</button><button class="btn sec" type="submit" data-close="1">Save &amp; close</button>
-            <button class="btn sec" type="button" data-act="mailtest">Save &amp; send test email</button>
-            ${S.email_password_set ? `<button class="btn danger" type="button" data-act="mailpwdel">Remove password</button>` : ""}</div>
-        </form></div>
-      <div class="card"><h2>Export / import projects</h2>
-        <p class="sub" style="margin:0 0 12px" data-secondary-copy>The export file contains all projects with their t3monitor keys and Basic auth passwords in plain text – pass it on over a trusted channel only. The GitLab token, Teams webhook and SMTP password are never exported.</p>
-        <div class="stack">
-          <div class="actions"><button class="btn sec" type="button" data-act="projexport">Export projects</button></div>
-          <div class="fields"><div><label>Export file</label><input id="impFile" type="file" accept=".json,application/json"></div></div>
-          <label class="check"><input type="checkbox" id="impOverwrite"> Overwrite projects that already exist (otherwise they are skipped)</label>
-          <div class="actions"><button class="btn sec" type="button" data-act="projimport">Import projects</button></div>
-        </div></div>
-      <div class="card"><h2>TYPO3 release check</h2><dl>
-        <dt>Schedule</dt><dd>${esc(S.scheduler.find(t => t.id === "typo3_release").schedule)} · <a href="#/scheduler">change in Scheduler</a></dd>
-        <dt>Last check</dt><dd>${esc(fmt(S.last_check))}</dd>
-        <dt>Latest</dt><dd>${Object.entries(S.typo3_latest).map(([m, v]) => `TYPO3 ${esc(m)}: ${esc(v)}`).join(", ") || "–"}</dd>
-      </dl><div style="margin-top:12px"><button class="btn sec" data-act="check">Check now</button></div></div>
+          <div class="pf-row r2 full">
+            <div><label for="em-user">Username</label><input id="em-user" name="user" value="${esc(m.user)}" autocomplete="off"></div>
+            <div><label for="em-pw">Password</label><input id="em-pw" name="password" type="password" autocomplete="new-password"
+              placeholder="${S.email_password_set ? "Stored. Leave empty to keep it." : "Not stored"}"></div>
+          </div>
+          <p class="pf-note full">Leave username empty if the server needs no login.</p>
+          <div class="pf-subhead full">Messages</div>
+          <div class="full"><label for="em-from">Sender</label><input id="em-from" name="from" value="${esc(m.from)}" placeholder="launcher@example.com"></div>
+          <div class="full"><label for="em-to">Recipients</label><input id="em-to" name="to" value="${esc(m.to.join(", "))}" placeholder="a@example.com, b@example.com">
+            <p class="pf-note">Separate addresses with commas.</p></div>
+          <div class="actions">${S.email_password_set ? `<button class="pf-link danger" type="button" data-act="mailpwdel">Remove password</button>` : ""}
+            <span class="pf-spacer"></span>
+            <button class="btn sec" type="button" data-act="mailtest" title="Saves, then sends a test email">Send test email</button>
+            <button class="btn" type="submit">Save</button></div>
+        </form>`)}
+      ${pfSec("archive", "Projects", "Export and import all projects", `
+        <div class="pf-form">
+          <div class="pf-split full">
+            <div><div class="pf-label">Export</div><p class="pf-desc">Download every project as one file. It contains t3monitor keys and Basic auth passwords in plain text; the GitLab token, Teams webhook and SMTP password are never exported.</p></div>
+            <button class="btn sec" type="button" data-act="projexport">${ic("download", "sm")} Export projects</button>
+          </div>
+          <hr class="pf-hr full">
+          <div class="full"><div class="pf-label">Import</div>
+            <label class="pf-drop" id="impDrop">${ic("upload")}<input id="impFile" type="file" accept=".json,application/json">
+              <b id="impTitle">Choose an export file</b><span id="impName">or drop it here</span></label></div>
+          <label class="pf-check full"><input type="checkbox" id="impOverwrite"> <span><b>Overwrite existing projects</b> (otherwise they are skipped)</span></label>
+          <div class="actions"><button class="btn" type="button" data-act="projimport">Import projects</button></div>
+        </div>`)}
+      ${pfSec("tag", "TYPO3 release check", "Latest versions to compare against", `
+        <div class="pf-form">
+          <div class="pf-tiles full">${latest.map(([maj, v]) => `<div class="pf-tile"><span>TYPO3 ${esc(maj)}</span><b>${esc(v)}</b></div>`).join("") || `<p class="pf-desc">No versions known yet.</p>`}</div>
+          <div class="pf-split full">
+            <p class="pf-desc">Checked ${esc(fmt(S.last_check))}${rel ? ` · ${esc(rel.schedule)}` : ""} · <a href="#/scheduler">Change in Scheduler</a></p>
+            <button class="btn sec" type="button" data-act="check">${ic("refresh", "sm")} Check now</button>
+          </div>
+        </div>`)}
     </div>`;
+  const drop = $("#impDrop"), file = $("#impFile");
+  file.onchange = () => {
+    const f = file.files[0];
+    $("#impTitle").textContent = f ? f.name : "Choose an export file";
+    $("#impName").textContent = f ? "Click to choose another file" : "or drop it here";
+    drop.classList.toggle("has-file", !!f);
+  };
+  drop.ondragover = ev => { ev.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = ev => {
+    ev.preventDefault(); drop.classList.remove("over");
+    if (ev.dataTransfer?.files?.length) { file.files = ev.dataTransfer.files; file.onchange(); }
+  };
   $("#msform").onsubmit = async ev => {
     ev.preventDefault();
     try { await saveTeams(); toast("Teams settings saved"); closeAfter(ev); } catch (e) { toast(e.message, true); }
@@ -1198,54 +1226,64 @@ async function loadProfileAvatar() {
 function loadOwnerAvatars() {
   document.querySelectorAll(".owner-av[data-user]").forEach(async box => paintAvatar(box, await userAvatarUrl(box.dataset.user)));
 }
+// Profile: one column of sections (title + short description left, fields right).
+const pfSec = (icon, title, desc, body) => `<section class="pf-sec">
+    <div class="pf-sec-head"><span class="pf-sec-ic">${ic(icon)}</span><div><h2>${title}</h2><p>${desc}</p></div></div>
+    <div class="pf-sec-body">${body}</div></section>`;
+const pfTokenInput = () => `<input id="gt-token" name="token" type="password" autocomplete="off" placeholder="glpat-…" required>`;
 async function viewProfile() {
   let me;
   try { me = await api("/api/profile"); } catch (e) { return toast(e.message, true); }
   const shown = me.full_name || me.name;
   const initials = shown.split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?";
+  const since = me.created ? new Date(me.created).toLocaleDateString("en-GB", {day: "numeric", month: "short", year: "numeric"}) : "";
+  const tk = S.gitlab_token || {};
   $("#view").innerHTML = `
-    <div class="profile stack">
-      <div class="card pf-hero">
+    <div class="profile">
+      <div class="pf-hero">
         <div class="pf-avatar" aria-hidden="true">${esc(initials)}</div>
         <div><h1 id="pf-shown">${esc(shown)}</h1>
-          <p class="sub">@${esc(me.name)} · member since ${esc((me.created || "").slice(0, 10))}</p></div>
+          <p class="sub">${me.full_name ? `@${esc(me.name)} · ` : ""}Member since ${esc(since)}</p></div>
       </div>
-      <div class="card"><h2>Account</h2>
+      ${pfSec("user", "Profile", "Your name and email address.", `
         <form id="pfform" class="pf-form">
-          <div><label for="pf-full">Full name</label><input id="pf-full" name="full_name" maxlength="100" autocomplete="name" value="${esc(me.full_name)}" placeholder="First and last name"></div>
-          <div><label for="pf-mail">Email</label><input id="pf-mail" name="email" type="email" maxlength="254" autocomplete="email" value="${esc(me.email)}" placeholder="name@example.com"></div>
-          <div class="actions"><button class="btn" type="submit">Save profile</button></div>
-        </form></div>
-      <div class="card"><h2>Appearance</h2>
+          <div class="full"><label for="pf-full">Full name</label><input id="pf-full" name="full_name" maxlength="100" autocomplete="name" value="${esc(me.full_name)}" placeholder="First and last name"></div>
+          <div class="full"><label for="pf-mail">Email</label><input id="pf-mail" name="email" type="email" maxlength="254" autocomplete="email" value="${esc(me.email)}" placeholder="name@example.com"></div>
+          <div class="actions"><button class="btn" type="submit">Save</button></div>
+        </form>`)}
+      ${pfSec("palette", "Appearance", "How T3 Watchdock looks for you. Saved in this browser only.", `
         <form id="apform" class="pf-form">
           <div><label for="ap-theme">Theme</label><select id="ap-theme" name="theme">
             ${THEMES.map(t => `<option value="${t.id}" ${(document.documentElement.dataset.theme || "auto") === t.id ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></div>
           <div><label for="ap-style">Style</label><select id="ap-style" name="style">
             ${STYLES.map(x => `<option value="${x.id}" ${(document.documentElement.dataset.style || "default") === x.id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select></div>
-          <p class="pf-hint full">Applied at once and saved in this browser only.</p>
-        </form></div>
-      <div class="card"><h2>Password</h2>
+        </form>`)}
+      ${pfSec("lock", "Password", "Enter your current password to set a new one. At least 12 characters; other sessions are signed out.", `
         <form id="pwform" class="pf-form">
           <input type="text" name="username" value="${esc(me.name)}" autocomplete="username" style="display:none">
           <div class="full"><label for="pw-cur">Current password</label><input id="pw-cur" name="current" type="password" autocomplete="current-password" required></div>
           <div><label for="pw-new">New password</label><input id="pw-new" name="new" type="password" autocomplete="new-password" minlength="12" required></div>
           <div><label for="pw-rep">Repeat new password</label><input id="pw-rep" name="repeat" type="password" autocomplete="new-password" minlength="12" required></div>
-          <p class="pf-hint full">At least 12 characters. Other sessions are signed out, this one stays. 3 wrong current passwords lock the account.</p>
-          <div class="actions"><button class="btn" type="submit">Change password</button></div>
-        </form></div>
-      <div class="card"><h2>GitLab token</h2>
-        <p class="pf-hint">Your personal access token (scope: api). Everything you do with GitLab here runs as you, also the automatic TYPO3 updates of projects you are responsible for. ${S.gitlab_token?.own ? "Stored encrypted. It is never shown again." : "No token stored."}</p>
+          <div class="actions"><button class="btn sec" type="submit">Update password</button></div>
+        </form>`)}
+      ${pfSec("key", "GitLab", "Personal access token (scope: api) for your GitLab instance. GitLab actions here run as you.", `
         <form id="gtform" class="pf-form">
           <input type="text" name="username" value="${esc(me.name)}" autocomplete="username" style="display:none">
-          <div class="full"><label for="gt-token">Personal access token</label><input id="gt-token" name="token" type="password" autocomplete="off" placeholder="glpat-…" required></div>
-          <div class="actions"><button class="btn" type="submit">Save token</button>
-            <button class="btn sec" type="button" data-act="tokentest">Test</button>
-            <button class="btn danger" type="button" data-act="tokendel">Remove</button></div>
-        </form></div>
+          <div class="full"><label for="gt-url">GitLab URL</label><input id="gt-url" name="gitlab_url" type="url" autocomplete="off" value="${esc(tk.url || DEFAULTS.gitlab_url)}" placeholder="https://gitlab.example.com" pattern="https://.+" required></div>
+          <div class="full"><label for="gt-token">Personal access token</label>
+            <div id="gt-slot">${tk.own ? `<div class="pf-secret"><span class="pf-dot" aria-hidden="true"></span>
+              <span class="pf-mask" aria-label="Token saved, hidden">••••••••••••••••••••••</span>
+              <span class="pf-saved">Saved</span><button class="pf-replace" type="button" id="gt-replace">Replace</button></div>` : pfTokenInput()}</div></div>
+          <div class="actions pf-actions">${tk.own ? `<button class="pf-link danger" type="button" data-act="tokendel">Remove token</button>` : ""}
+            <span class="pf-spacer"></span>
+            <button class="btn sec" type="button" data-act="tokentest"${tk.own ? "" : " disabled"}>Test connection</button>
+            <button class="btn" type="submit">Save</button></div>
+        </form>`)}
     </div>`;
+  $("#gt-replace")?.addEventListener("click", () => { $("#gt-slot").innerHTML = pfTokenInput(); $("#gt-token").focus(); });
   $("#gtform").onsubmit = async ev => {
     ev.preventDefault();
-    try { const d = await api("/api/token", {token: ev.target.token.value}); ev.target.reset(); await refresh(); toast(d.msg); viewProfile(); }
+    try { const d = await api("/api/token", {token: ev.target.token?.value || "", gitlab_url: ev.target.gitlab_url.value.trim()}); ev.target.reset(); await refresh(); toast(d.msg); viewProfile(); }
     catch (e) { toast(e.message, true); }
   };
   loadProfileAvatar();
@@ -1582,7 +1620,7 @@ document.addEventListener("click", e => {
    Steps whose element is missing (e.g. no projects, no admin) are skipped. Keys: → / Enter next, ← back, Esc end.
    Progress is kept per browser: an unfinished tour resumes after a reload, a finished one does not start again. */
 const firstProject = () => S.projects[0] ? pUrl(S.projects[0]) : null;
-const cardWith = sel => () => document.querySelector(sel)?.closest(".card");
+const cardWith = sel => () => document.querySelector(sel)?.closest(".card, .pf-sec");
 const cardTitled = t => () => [...document.querySelectorAll("#view .card h2")].find(h => h.textContent.includes(t))?.closest(".card");
 const TOUR = [
   {title: "Welcome to T3 Watchdock", text: "This tour shows the main parts in about a minute. Use the buttons or → / ←; Esc ends it. Restart it any time with the ⓘ button at the top."},
