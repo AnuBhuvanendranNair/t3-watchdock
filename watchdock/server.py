@@ -14,7 +14,7 @@ from .core import ALLOWED_HOSTS, BASE, BEHIND_PROXY, config, lock, log, now, sav
 from . import auth, db
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
 from .extensions import ext_changelog, ext_release
-from .gitlab import delete_token, find_project, gitlab, import_token_files, last_run_status, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, set_user, test_token, token_status
+from .gitlab import delete_token, find_project, gitlab, import_token_files, last_run_status, own_avatar, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, set_user, test_token, token_status
 from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_fetch, t3m_key, t3m_key_file, t3m_summary, t3m_view
 from .watcher import resume_mail_watches
 from .projects import add_project, export_projects, import_projects, update_monitoring, update_project
@@ -164,6 +164,7 @@ def state():
     return ok({
         "user": g.user,
         "admin": db.user_is_admin(g.user),
+        "users": db.user_names(),
         "projects": cfg["projects"],
         "scheduler": sched_view(),
         "gitlab_token": token_status(g.user),
@@ -273,6 +274,19 @@ def logout():
 @app.get("/api/profile")
 def profile():
     return ok(db.user_profile(g.user))
+
+
+@app.get("/api/profile/avatar")
+def profile_avatar():
+    return ok(own_avatar(g.user))
+
+
+@app.get("/api/users/avatar")                        # GitLab picture of a user (responsible person on project cards)
+def user_avatar():
+    name = q1("name")
+    if not db.user_get(name):
+        return send(404, {"error": "No such user"})
+    return ok(own_avatar(name))
 
 
 @app.post("/api/profile")

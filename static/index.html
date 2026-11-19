@@ -51,12 +51,7 @@ try { const t = localStorage.getItem("theme"), s = localStorage.getItem("style")
     <a href="#/plugins" data-nav="plugins">Plugins</a>
   </nav>
   <div class="hdr-tools">
-    <label class="style-pick" title="Style"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-palette"/></svg>
-    <select class="pill style-sel" id="styleSel" aria-label="Style">
-      <option value="default">Default</option><option value="focus">Focus</option><option value="terminal">Terminal</option><option value="turbo">Turbo C++</option></select></label>
-    <button type="button" class="pill theme-btn" id="themeBtn"></button>
-  </div>
-  <div class="hdr-tools">
+    <button type="button" class="pill theme-btn" id="tourBtn" title="Guided tour" aria-label="Guided tour"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-info"/></svg></button>
     <span class="pill" id="tokenPill">…</span>
     <a class="pill theme-btn" id="profileBtn" href="#/profile" title="Profile" aria-label="Profile" data-nav="profile"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-user"/></svg></a>
     <button type="button" class="pill theme-btn" id="logoutBtn" title="Sign out" aria-label="Sign out"></button>

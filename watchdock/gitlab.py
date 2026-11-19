@@ -56,6 +56,7 @@ def token(write=False):
 def save_token(user, value):
     """user: own token of that user; None: service token."""
     enc = crypto.encrypt(_clean(value))
+    _avatars.pop(user, None)
     if user:
         db.user_token_set(user, enc)
         log(f"Personal GitLab token saved: {user}")
@@ -65,6 +66,7 @@ def save_token(user, value):
 
 
 def delete_token(user):
+    _avatars.pop(user, None)
     if user:
         db.user_token_set(user, None)
         log(f"Personal GitLab token removed: {user}")
@@ -101,10 +103,37 @@ def import_token_files():
             log(f"Plaintext token file removed: {f}")
 
 
+def _main_host():
+    """GitLab of the first project (or gitlab.gingco.de): where tokens are tested and the profile is read."""
+    projects = config()["projects"]
+    return (projects[0]["gitlab_url"] if projects else "https://gitlab.gingco.de").rstrip("/")
+
+
+AVATAR_TTL = 3600
+_avatars = {}                                   # user -> (fetched at, {"url", "gitlab"})
+
+
+def own_avatar(user):
+    """Avatar URL of the user's own GitLab account (own token only, never the service token's account)."""
+    hit = _avatars.get(user)
+    if hit and time.time() - hit[0] < AVATAR_TTL:
+        return hit[1]
+    url, avatar = _main_host(), None
+    if db.user_token(user):
+        try:
+            req = urllib.request.Request(url + "/api/v4/user", headers={"PRIVATE-TOKEN": stored_token(user)})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                avatar = json.load(r).get("avatar_url")
+        except Exception:
+            pass                                # initials are shown instead
+    out = {"url": avatar, "gitlab": url}
+    _avatars[user] = (time.time(), out)
+    return out
+
+
 def test_token(user):
     """Check the own (user) or service (None) token against GitLab of the first project (or gitlab.gingco.de)."""
-    projects = config()["projects"]
-    url = (projects[0]["gitlab_url"] if projects else "https://gitlab.gingco.de").rstrip("/")
+    url = _main_host()
     req = urllib.request.Request(url + "/api/v4/user", headers={"PRIVATE-TOKEN": stored_token(user)})
     try:
         with urllib.request.urlopen(req, timeout=15) as r:

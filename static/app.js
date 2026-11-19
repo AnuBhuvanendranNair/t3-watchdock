@@ -48,36 +48,25 @@ const dbShort = v => { const m = String(v || "").match(/(\d+\.\d+(?:\.\d+)?)/); 
   return (/mariadb/i.test(v) ? "MariaDB " : "MySQL ") + m[1]; };
 const fmt = t => t ? t.replace("T", " ") : "–";
 
-// Theme switch in the header: Auto (system) → Light → Dark; saved per browser
-const THEMES = [{id:"auto", icon:"auto", hint:"follows the system setting"},
-  {id:"light", icon:"sun", hint:"always light"}, {id:"dark", icon:"moon", hint:"always dark"}];
+// Theme (Auto = system → Light → Dark) and style, chosen on the Profile page; saved per browser.
+// The saved values are applied by the inline script in index.html before the page renders.
+const THEMES = [{id:"auto", label:"Auto (system)"}, {id:"light", label:"Light"}, {id:"dark", label:"Dark"}];
 function setTheme(id, save) {
   const root = document.documentElement, t = THEMES.find(x => x.id === id) || THEMES[0];
   if (t.id === "auto") delete root.dataset.theme; else root.dataset.theme = t.id;
   if (save) try { t.id === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", t.id); } catch (e) {}
-  const b = $("#themeBtn"), next = THEMES[(THEMES.indexOf(t) + 1) % THEMES.length];
-  b.innerHTML = ic(t.icon); b.title = `Theme: ${t.id} (${t.hint}). Click for ${next.id}.`;
-  b.setAttribute("aria-label", b.title);
 }
-setTheme(document.documentElement.dataset.theme || "auto");
 $("#logoutBtn").innerHTML = ic("logout");
 $("#logoutBtn").onclick = () => api("/api/logout", {}).then(() => location.replace("/login"), e => toast(e.message, true));
-$("#themeBtn").onclick = () => {
-  const cur = document.documentElement.dataset.theme || "auto";
-  setTheme(THEMES[(THEMES.findIndex(x => x.id === cur) + 1) % THEMES.length].id, true);
-};
 
-// Style selector next to the theme switch; saved per browser
-const STYLES = ["default", "focus", "terminal", "turbo"];
+const STYLES = [{id:"default", label:"Default"}, {id:"focus", label:"Focus"}, {id:"terminal", label:"Terminal"},
+  {id:"turbo", label:"Turbo C++"}];
 const focusAvatars = new Map();
 function setStyle(id, save) {
-  const root = document.documentElement, st = STYLES.includes(id) ? id : "default";
+  const root = document.documentElement, st = STYLES.some(x => x.id === id) ? id : "default";
   if (st === "default") delete root.dataset.style; else root.dataset.style = st;
   if (save) try { st === "default" ? localStorage.removeItem("style") : localStorage.setItem("style", st); } catch (e) {}
-  $("#styleSel").value = root.dataset.style || "default";
 }
-setStyle(document.documentElement.dataset.style || "default");
-$("#styleSel").onchange = ev => setStyle(ev.target.value, true);
 
 // GitHub-style confirmation for destructive actions: the button is enabled only once the exact name is typed.
 // Resolves true (confirmed) or false (cancelled / Escape).
@@ -286,7 +275,10 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
         ${envLbl(e)}${ready ? "" : " · Key missing"}
       </span>`;
     }).join("");
+    const owner = p.owner && (S.users || []).find(u => u.name === p.owner);
+    const ownerName = owner ? owner.full_name || owner.name : "";
     return `<article class="pcard focus-project" data-pid="${esc(p.id)}">
+      ${owner ? `<span class="owner-av" data-user="${esc(owner.name)}" title="Responsible: ${esc(ownerName)}" role="img" aria-label="Responsible: ${esc(ownerName)}">${esc(initialsOf(ownerName))}</span>` : ""}
       <a class="focus-project-link name" href="${pUrl(p)}">
         ${projectsWithRuns.has(p.id) ? `<span class="focus-avatar" data-project="${esc(p.id)}" data-gitlab="${esc(p.gitlab_url)}" aria-hidden="true">${esc(p.name.trim().split(/\s+/u, 2).map(word => Array.from(word)[0] || "").join("").toLocaleUpperCase())}</span>` : ""}
         <span class="focus-project-name" title="${esc(p.name)}">${esc(p.name)}</span><span class="focus-project-arrow" aria-hidden="true">›</span>
@@ -320,6 +312,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
   $("#view").dataset.pview = projView();
   paintTechFilter();
   loadFocusAvatars();
+  loadOwnerAvatars();
   paintRunStatus();
   if (S.runs.length) loadRunStatus();          // server caches it (8 s active, 5 min finished)
   if (!S.projects.length) return;
@@ -966,6 +959,9 @@ function viewForm(p) {
       <div class="card"><div class="sec-title">Basics</div>
         <div class="fields">
         <div><label>Name<span data-noci> *</span></label><input name="name" value="${esc(p?.name)}" placeholder="WVG Online"></div>
+        <div><label for="pf-owner">Responsible person</label><select id="pf-owner" name="owner"><option value="">– none –</option>
+          ${(S.users || []).map(u => `<option value="${esc(u.name)}" ${p?.owner === u.name ? "selected" : ""}>${esc(u.full_name ? `${u.full_name} (${u.name})` : u.name)}</option>`).join("")}</select>
+          <div class="hint">Shown with their GitLab picture on the project card.</div></div>
         <div><label>GitLab URL</label><input name="gitlab_url" value="${esc(v.gitlab_url || DEFAULTS.gitlab_url)}"></div>
         <div><label>Project path<span data-ci> *</span></label><input name="path" value="${esc(p?.path)}" placeholder="type to search GitLab…" list="projlist" autocomplete="off" required>
           <div class="hint" id="pinfo"></div></div>
@@ -1067,7 +1063,7 @@ function viewForm(p) {
   $("#pform").onsubmit = async ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const body = {ci:f.get("ci") === "on", name:f.get("name"), gitlab_url:f.get("gitlab_url"), path:f.get("path"), ref:f.get("ref"),
+    const body = {ci:f.get("ci") === "on", name:f.get("name"), owner:f.get("owner"), gitlab_url:f.get("gitlab_url"), path:f.get("path"), ref:f.get("ref"),
       variables:parseVars(f.get("variables")), auto_play:f.get("auto_play"),
       auto_enabled:f.get("auto_enabled") === "on", major:f.get("major"),
       auto_variables:parseVars(f.get("auto_variables")), auto_typo3_play:f.get("auto_typo3_play"),
@@ -1188,6 +1184,35 @@ function viewSettings() {
 // Plugins page: plugins installed in plugins/<name>/, switch on/off, settings as JSON. Adding plugin code stays a
 // file + rebuild step on purpose: a plugin is Python that runs in the app (no upload without a login).
 // Profile: change the own password (current password required; other sessions are signed out)
+// GitLab picture of a Watchdock user (read with that user's own token); initials stay when there is none.
+// Only an https URL on the GitLab host itself is loaded (same rule as the project avatars). Cached per page load.
+const userAvatars = new Map();
+function userAvatarUrl(name, own) {
+  const key = own ? "\u0000me" : name;
+  if (!userAvatars.has(key)) userAvatars.set(key,
+    api(own ? "/api/profile/avatar" : `/api/users/avatar?name=${encodeURIComponent(name)}`).then(d => {
+      if (!d.url) return null;
+      const base = new URL(d.gitlab), avatar = new URL(d.url, base);
+      return avatar.protocol === "https:" && avatar.origin === base.origin && !avatar.username && !avatar.password ? avatar.href : null;
+    }).catch(() => null));
+  return userAvatars.get(key);
+}
+function paintAvatar(box, url) {
+  if (!url || !box?.isConnected || box.querySelector("img")) return;
+  const image = new Image();
+  image.alt = "";
+  image.referrerPolicy = "no-referrer";
+  image.onload = () => { if (box.isConnected && !box.querySelector("img")) box.replaceChildren(image); };
+  image.src = url;
+}
+const initialsOf = s => (s || "").split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?";
+async function loadProfileAvatar() {
+  const box = $(".pf-avatar");
+  paintAvatar(box, await userAvatarUrl(null, true));
+}
+function loadOwnerAvatars() {
+  document.querySelectorAll(".owner-av[data-user]").forEach(async box => paintAvatar(box, await userAvatarUrl(box.dataset.user)));
+}
 async function viewProfile() {
   let me;
   try { me = await api("/api/profile"); } catch (e) { return toast(e.message, true); }
@@ -1205,6 +1230,14 @@ async function viewProfile() {
           <div><label for="pf-full">Full name</label><input id="pf-full" name="full_name" maxlength="100" autocomplete="name" value="${esc(me.full_name)}" placeholder="First and last name"></div>
           <div><label for="pf-mail">Email</label><input id="pf-mail" name="email" type="email" maxlength="254" autocomplete="email" value="${esc(me.email)}" placeholder="name@example.com"></div>
           <div class="actions"><button class="btn" type="submit">Save profile</button></div>
+        </form></div>
+      <div class="card"><h2>Appearance</h2>
+        <form id="apform" class="pf-form">
+          <div><label for="ap-theme">Theme</label><select id="ap-theme" name="theme">
+            ${THEMES.map(t => `<option value="${t.id}" ${(document.documentElement.dataset.theme || "auto") === t.id ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></div>
+          <div><label for="ap-style">Style</label><select id="ap-style" name="style">
+            ${STYLES.map(x => `<option value="${x.id}" ${(document.documentElement.dataset.style || "default") === x.id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select></div>
+          <p class="pf-hint full">Applied at once and saved in this browser only.</p>
         </form></div>
       <div class="card"><h2>Password</h2>
         <form id="pwform" class="pf-form">
@@ -1230,6 +1263,9 @@ async function viewProfile() {
     try { const d = await api("/api/token", {token: ev.target.token.value}); ev.target.reset(); await refresh(); toast(d.msg); viewProfile(); }
     catch (e) { toast(e.message, true); }
   };
+  loadProfileAvatar();
+  $("#ap-theme").onchange = ev => setTheme(ev.target.value, true);
+  $("#ap-style").onchange = ev => setStyle(ev.target.value, true);
   $("#pfform").onsubmit = async ev => {
     ev.preventDefault();
     const f = ev.target;
@@ -1561,10 +1597,131 @@ document.addEventListener("click", e => {
   if (el && actions[el.dataset.act]) { e.preventDefault(); actions[el.dataset.act](el); }
 });
 
+/* ---------------- guided tour ----------------
+   Step = {route?, el?, title, text}. route: hash to open first (string or function); el: CSS selector or function.
+   Steps whose element is missing (e.g. no projects, no admin) are skipped. Keys: → / Enter next, ← back, Esc end.
+   Progress is kept per browser: an unfinished tour resumes after a reload, a finished one does not start again. */
+const firstProject = () => S.projects[0] ? pUrl(S.projects[0]) : null;
+const cardWith = sel => () => document.querySelector(sel)?.closest(".card");
+const cardTitled = t => () => [...document.querySelectorAll("#view .card h2")].find(h => h.textContent.includes(t))?.closest(".card");
+const TOUR = [
+  {title: "Welcome to T3 Watchdock", text: "This tour shows the main parts in about a minute. Use the buttons or → / ←; Esc ends it. Restart it any time with the ⓘ button at the top."},
+  {el: "header nav", title: "Navigation", text: "Projects, Activity (runs and log), Scheduler (automatic tasks), Settings and Plugins."},
+  {el: "#tokenPill", title: "Your GitLab token", text: "Shows ✓ when your own token is stored. Pipelines and jobs you start run as you in GitLab."},
+  {el: "#profileBtn", title: "Profile", text: "Name, email, password, your GitLab token and the appearance (theme and style)."},
+  {route: "#/", el: ".grid .pcard", title: "Project card", text: "Monitoring per environment, the last CI/CD pipeline and its result. The picture at the bottom right is the responsible person. Click the card for details."},
+  {route: "#/", el: "#view .seg", title: "Cards or table", text: "Switch between project cards and the TYPO3 status table."},
+  {route: "#/", el: "[data-act=tftoggle]", title: "Filter", text: "Filter the projects by technology and version."},
+  {route: "#/", el: "[data-act=runall]", title: "Run all", text: "Starts the main pipeline (not production) of every CI/CD project."},
+  {route: "#/", el: '#view a[href="#/new"]', title: "New project", text: "Add a GitLab project. Name, branches and manual jobs are pre-filled from GitLab."},
+  {route: "#/", el: "#t3sum", title: "TYPO3 status", text: "TYPO3 version, errors and warnings of every monitored instance from the last t3monitor check. ↑ = TYPO3 update available, ≠ = staging differs from production."},
+  {route: firstProject, el: "#view .pipe-env", title: "Pipelines", text: "Start a pipeline per environment with ▶. The current pipeline and its jobs appear here; production can be promoted after a successful staging pipeline."},
+  {route: firstProject, el: '#view .head a[href$="/edit"]', title: "Edit project", text: "Branches, variables, auto-play jobs, TYPO3 auto-update, monitoring, and the responsible person shown on the card."},
+  {route: "#/activity", el: "#view .card", title: "Activity", text: "All pipeline runs started from Watchdock and the activity log."},
+  {route: "#/scheduler", el: "#view .card", title: "Scheduler", text: "Automatic tasks such as the TYPO3 release check: interval or daily time, or run now. They use the GitLab service token."},
+  {route: "#/settings", el: cardTitled("GitLab service token"), title: "Settings", text: "Admins store the GitLab service token for background work here. Below: Teams and email notifications, project export / import."},
+  {route: "#/profile", el: cardWith("#gtform"), title: "Your GitLab token", text: "Save your personal access token (scope api) here. It is stored encrypted and never shown again."},
+  {route: "#/profile", el: cardWith("#apform"), title: "Appearance", text: "Theme and style, saved in this browser."},
+  {route: "#/", title: "That's it", text: "Restart the tour any time with the ⓘ button at the top."},
+];
+const tour = {i: -1, el: null, dir: 1};
+const tourStore = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} };
+const tourRead = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const tourFind = s => typeof s.el === "function" ? s.el() : s.el ? document.querySelector(s.el) : null;
+
+function tourStart(at = 0) {
+  if (!$("#tourUi")) document.body.insertAdjacentHTML("beforeend", `<div id="tourUi">
+    <div class="tour-block"></div><div class="tour-hole" hidden></div>
+    <div class="tour-pop" role="dialog" aria-modal="true" aria-labelledby="tourTitle" aria-describedby="tourText">
+      <div class="tour-top"><span class="tour-count" id="tourCount"></span>
+        <button type="button" class="tour-x" data-tour="end" title="End tour" aria-label="End tour">${ic("close")}</button></div>
+      <div class="tour-bar"><span id="tourBar"></span></div>
+      <h2 id="tourTitle"></h2><p id="tourText"></p>
+      <div class="tour-actions"><button type="button" class="btn sec" data-tour="back">Back</button>
+        <button type="button" class="btn" data-tour="next">Next</button></div></div></div>`);
+  $("#tourUi").hidden = false;
+  tourShow(at, 1);
+}
+
+function tourEnd() {
+  tour.i = -1; tour.el = null;
+  tourStore("tour_step", null); tourStore("tour_done", "1");
+  if ($("#tourUi")) $("#tourUi").hidden = true;
+  $("#tourBtn").focus();
+}
+
+async function tourShow(i, dir) {
+  if (i < 0) i = 0;
+  if (i >= TOUR.length) return tourEnd();
+  tour.i = i; tour.dir = dir; tourStore("tour_step", i);
+  const s = TOUR[i], route = typeof s.route === "function" ? s.route() : s.route;
+  if (s.route && !route) return tourShow(i + dir, dir);               // e.g. no project for the project steps
+  if (route && (location.hash || "#/") !== route) { location.hash = route; await new Promise(r => setTimeout(r, 60)); }
+  let el = null;
+  for (let n = 0; s.el && n < 30 && !(el = tourFind(s)); n++) await new Promise(r => setTimeout(r, 100));
+  if (tour.i !== i) return;                                           // moved on meanwhile
+  if (s.el && !el) return tourShow(i + dir, dir);                     // element not on this page: skip
+  tour.el = el;
+  if (el) el.scrollIntoView({block: "center", behavior: "instant"});
+  $("#tourCount").textContent = `${i + 1} / ${TOUR.length}`;
+  $("#tourBar").style.width = `${Math.round((i + 1) / TOUR.length * 100)}%`;
+  $("#tourTitle").textContent = s.title;
+  $("#tourText").textContent = s.text;
+  $("[data-tour=back]").disabled = i === 0;
+  $("[data-tour=next]").textContent = i === TOUR.length - 1 ? "Finish" : "Next";
+  tourPlace();
+  $("[data-tour=next]").focus();
+}
+
+function tourPlace() {
+  if (tour.i < 0) return;
+  if (tour.el && !tour.el.isConnected) tour.el = tourFind(TOUR[tour.i]);   // view was re-rendered
+  const hole = $(".tour-hole"), pop = $(".tour-pop"), pad = 6, gap = 12, m = 16;
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  hole.hidden = !tour.el;
+  $(".tour-block").classList.toggle("dim", !tour.el);
+  pop.style.maxWidth = `${Math.min(360, vw - 2 * m)}px`;
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  if (!tour.el) { pop.style.left = `${(vw - pw) / 2}px`; pop.style.top = `${Math.max(m, (vh - ph) / 2)}px`; return; }
+  const r = tour.el.getBoundingClientRect();
+  Object.assign(hole.style, {left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px`});
+  let top = r.bottom + pad + gap;                                     // below; above if it does not fit; else inside the view
+  if (top + ph > vh - m) top = r.top - pad - gap - ph >= m ? r.top - pad - gap - ph : Math.max(m, vh - m - ph);
+  const left = Math.min(Math.max(m, r.left + r.width / 2 - pw / 2), vw - m - pw);
+  pop.style.left = `${left}px`; pop.style.top = `${top}px`;
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-tour]");
+  if (!b) return;
+  const a = b.dataset.tour;
+  if (a === "end") tourEnd();
+  else if (a === "next") tourShow(tour.i + 1, 1);
+  else if (a === "back") tourShow(tour.i - 1, -1);
+});
+document.addEventListener("keydown", e => {
+  if (tour.i < 0) return;
+  if (e.key === "Escape") { e.preventDefault(); tourEnd(); }
+  else if (e.key === "ArrowRight" || (e.key === "Enter" && !e.target.closest("button"))) { e.preventDefault(); tourShow(tour.i + 1, 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); tourShow(tour.i - 1, -1); }
+  else if (e.key === "Tab") {                                         // keep focus inside the popup
+    const f = [...document.querySelectorAll(".tour-pop button:not(:disabled)")], k = f.indexOf(document.activeElement);
+    e.preventDefault(); f[(k + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+  }
+}, true);
+window.addEventListener("resize", tourPlace);
+window.addEventListener("scroll", tourPlace, true);
+$("#tourBtn").onclick = () => tourStart(0);
+
 window.addEventListener("hashchange", render);
-loadPlugins().finally(render);
+loadPlugins().finally(async () => {
+  await render();
+  const step = tourRead("tour_step");                // unfinished tour resumes; first visit starts it once
+  if (step != null) tourStart(Number(step) || 0);
+  else if (!tourRead("tour_done")) tourStart(0);
+});
 setInterval(async () => {          // refresh list views only when their data changed; never interrupt forms or pipeline view
-  if (document.hidden) return;     // background tab: no polling
+  if (document.hidden || tour.i >= 0) return;     // background tab or guided tour: no polling
   const h = location.hash.slice(1) || "/", prevS = JSON.stringify(S), prevSum = JSON.stringify(T3SUM);
   await refresh();
   const changed = JSON.stringify(S) !== prevS;

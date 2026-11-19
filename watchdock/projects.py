@@ -2,7 +2,7 @@
 import re
 
 from .core import config, lock, log, now, save_config
-from .db import typo3_seen_reset
+from .db import typo3_seen_reset, user_get
 from .t3monitor import T3M_ENVS, _t3m_url, t3m_env, _t3m_user, save_t3m_key, t3m_auth_password, t3m_key, t3m_key_file
 
 EXPORT_FORMAT = "t3-watchdock-projects"
@@ -23,6 +23,9 @@ def build_project(b, pid=None):
         raise RuntimeError("Path and branch are required")
     if not ci and not (name or path):
         raise RuntimeError("Name or project path is required")
+    owner = (b.get("owner") or "").strip()      # responsible person: a Watchdock user name (shown on the card)
+    if owner and not user_get(owner):
+        raise RuntimeError(f"Unknown user: {owner}")
     if not pid:
         pid = (path + "-" + ref).replace("/", "-") if path and ref else re.sub(r"[^a-z0-9]+", "-", (name or path).lower()).strip("-")
         if not pid:
@@ -30,6 +33,7 @@ def build_project(b, pid=None):
     return {
         "id": pid,
         "name": name or path,
+        "owner": owner,
         "ci": ci,
         "gitlab_url": (b.get("gitlab_url") or "https://gitlab.gingco.de").strip().rstrip("/"),
         "path": path,
@@ -138,7 +142,9 @@ def _import_entry(entry):
          "auto_play": p.get("auto_play"), "auto_enabled": auto.get("enabled"), "major": auto.get("major"),
          "auto_variables": _str_map(auto.get("variables"), f"{pid}: TYPO3 update variables"),
          "auto_typo3_play": auto.get("auto_play"), "prod_ref": prod.get("ref"),
-         "prod_variables": _str_map(prod.get("variables"), f"{pid}: production variables"), "prod_play": prod.get("auto_play")}
+         "prod_variables": _str_map(prod.get("variables"), f"{pid}: production variables"), "prod_play": prod.get("auto_play"),
+         # user names are per installation: kept only if that user exists here
+         "owner": p.get("owner") if isinstance(p.get("owner"), str) and user_get(p["owner"]) else ""}
     for k in ("name", "path", "ref", "gitlab_url", "prod_ref"):
         if not isinstance(b[k] or "", str):
             raise RuntimeError(f"{pid}: {k} must be text")

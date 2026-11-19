@@ -379,6 +379,11 @@ def sessions_delete_user(user, keep=None):
         c.execute("DELETE FROM sessions WHERE user = ? AND token_hash IS NOT ?", (user, keep))
 
 
+def user_names():
+    """Name and full name of all users (select box for the responsible person of a project)."""
+    return _rows("SELECT name, full_name FROM users ORDER BY name")
+
+
 def user_is_admin(name):
     r = _rows("SELECT admin FROM users WHERE name = ?", (name,))
     return bool(r and r[0]["admin"])
