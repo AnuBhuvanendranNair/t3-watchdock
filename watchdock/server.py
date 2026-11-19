@@ -14,7 +14,7 @@ from .core import ALLOWED_HOSTS, BASE, BEHIND_PROXY, config, lock, log, now, sav
 from . import auth, db
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
 from .extensions import ext_changelog, ext_release
-from .gitlab import delete_token, find_project, gitlab, import_token_files, last_run_status, own_avatar, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, set_user, test_token, token_status
+from .gitlab import delete_token, find_project, gitlab, last_run_status, legacy_token_files, own_avatar, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, set_user, test_token, token_status
 from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_fetch, t3m_key, t3m_key_file, t3m_summary, t3m_view
 from .watcher import resume_mail_watches
 from .projects import add_project, export_projects, import_projects, update_monitoring, update_project
@@ -48,10 +48,7 @@ def start_background():
         if _started:
             return
         _started = True
-    try:
-        import_token_files()                # former plaintext .gitlab-token -> encrypted service token
-    except Exception as e:
-        log(f"GitLab token import failed: {e}")
+    legacy_token_files()                    # former shared .gitlab-token: unused, logged for deletion
     resume_mail_watches()
     threading.Thread(target=scheduler, daemon=True).start()
 
@@ -163,7 +160,6 @@ def state():
     cfg = config()
     return ok({
         "user": g.user,
-        "admin": db.user_is_admin(g.user),
         "users": db.user_names(),
         "projects": cfg["projects"],
         "scheduler": sched_view(),
@@ -338,17 +334,7 @@ def play():
     return ok(r)
 
 
-def _admin():
-    if not db.user_is_admin(g.user):
-        raise PermissionError("Only an admin can change the service token (t3-watchdock set-admin NAME on)")
-
-
-@app.errorhandler(PermissionError)
-def forbidden(e):
-    return send(403, {"error": str(e)})
-
-
-@app.post("/api/token")                              # own GitLab token (Profile)
+@app.post("/api/token")                              # own GitLab token (Profile); the only kind of token
 def token():
     save_token(g.user, body().get("token"))
     return ok({"msg": test_token(g.user)})
@@ -362,26 +348,6 @@ def token_test():
 @app.post("/api/token/delete")
 def token_delete():
     delete_token(g.user)
-    return ok({"ok": True})
-
-
-@app.post("/api/token/service")                      # service token for scheduler / watcher (Settings, admin only)
-def service_token():
-    _admin()
-    save_token(None, body().get("token"))
-    return ok({"msg": test_token(None)})
-
-
-@app.post("/api/token/service/test")
-def service_token_test():
-    _admin()
-    return ok({"msg": test_token(None)})
-
-
-@app.post("/api/token/service/delete")
-def service_token_delete():
-    _admin()
-    delete_token(None)
     return ok({"ok": True})
 
 
