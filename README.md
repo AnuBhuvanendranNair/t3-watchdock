@@ -47,8 +47,11 @@ Python web app ([Flask](https://flask.palletsprojects.com), served by [Gunicorn]
 - **Save & close** — Scheduler and Settings forms have *Save* (stay on the page) and *Save & close* (back to Projects)
 - **Flash messages** — results and errors appear top right (green ✓ / red ⚠; 6 s, errors 12 s; click to close)
 - **Icon buttons** — actions are icons with a tooltip (also the accessible name); icon set: [Lucide](https://lucide.dev), see *Icons*
-- **Dark / light theme** — switch in the header: monitor icon *Auto* (follows the system setting) → sun *Light* → moon *Dark*; the choice is saved in the browser (`localStorage`) and applied before the page is drawn
-- **Focus style** — choose *Focus* in the header style selector for a quieter look with less repeated copy (its projects page layout is now the layout of every style). It follows the Auto, Light, or Dark setting and is saved per browser.
+- **Dark / light theme** — *Profile → Appearance → Theme*: *Auto* (follows the system setting), *Light* or *Dark*; the choice is saved in the browser (`localStorage`) and applied before the page is drawn
+- **Focus style** — choose *Focus* in *Profile → Appearance → Style* for a quieter look with less repeated copy (its projects page layout is now the layout of every style). It follows the Auto, Light, or Dark setting and is saved per browser.
+- **Guided tour** — the ⓘ button in the header starts an 18-step tour across Projects, a project, Activity, Scheduler, Settings and Profile (spotlight + popup, → / ← / Esc, progress bar). Starts once by itself on the first visit per browser; an unfinished tour resumes after a reload. Steps whose element is missing (e.g. no projects) are skipped
+- **Responsible person** — *Edit project → Basics → Responsible person* (a Watchdock user); the project card shows their GitLab picture (read with their own token; initials without one)
+- **Profile picture** — the Profile page shows your GitLab picture when your own token is stored
 - **Terminal style** — monospace font everywhere (system SF Mono/Menlo, no web fonts), square corners, outlined buttons, `$ ~/t3 watchdock` prompt with blinking cursor, `#`/`##` heading prefixes and `./` nav links; project cards of equal height with the CI/CD line at the bottom, environments as `PRD` / `STG`, a waiting manual job as an info icon with the message in a tooltip (hover, focus or click); *Dark* = phosphor green on black, *Light* = paper terminal; saved per browser
 - **Turbo C++ style** — classic DOS IDE look in the 16-colour CGA palette — grey menu bar with red hotkey letters and green selection, windows with double borders and centered titles, green buttons with shadow, cyan input fields; *Dark* = blue editor screen, *Light* = grey dialog look
 
@@ -323,15 +326,13 @@ The UI uses [Lucide](https://lucide.dev) icons (ISC licence, copy in `static/ico
 | `patchday` | `calendar-check` | Patchday plugin |
 | `ext` | `external-link` | External links |
 | `details`, `close` | `maximize-2`, `x` | Open / close the status modal |
-| `info` | `info` | Waiting manual job on a project card (Terminal style) |
+| `info` | `info` | Waiting manual job on a project card (Terminal style), guided tour button |
 | `shield`, `clock` | `shield-alert`, `clock` | Security advisories / PHP check chips in the TYPO3 overview |
 | `err`, `warn`, `ok` | `circle-alert`, `triangle-alert`, `circle-check` | Error / warning badges |
 | `grid`, `list`, `filter`, `plus` | `layout-grid`, `list`, `list-filter`, `plus` | Projects page |
 | `chev` | `chevron-down` | Expandable rows in the status modal |
-| `auto`, `sun`, `moon` | `monitor`, `sun`, `moon` | Theme switch |
 | `logout` | `log-out` | Sign out (tooltip shows the signed-in name) |
-| `palette` | `palette` | Style selector in the header |
-| `user` | `user` | Profile page (change own password) |
+| `user` | `user` | Profile page (account, password, GitLab token, appearance) |
 
 Use in `static/app.js`: `ic("refresh")` returns the `<svg>`, `icBtn("refresh", "Tooltip text", 'data-act="…"')` an icon-only button (tooltip = accessible name). Plugins get the same helper as `watchdock.ic`.
 
