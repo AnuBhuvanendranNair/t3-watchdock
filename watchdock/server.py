@@ -336,7 +336,8 @@ def play():
 
 @app.post("/api/token")                              # own GitLab token (Profile); the only kind of token
 def token():
-    save_token(g.user, body().get("token"))
+    b = body()
+    save_token(g.user, b.get("token"), b.get("gitlab_url"))
     return ok({"msg": test_token(g.user)})
 
 

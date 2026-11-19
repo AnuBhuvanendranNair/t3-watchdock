@@ -65,6 +65,10 @@ SCHEMA = [
     ALTER TABLE users DROP COLUMN admin;
     ALTER TABLE mail_watch ADD COLUMN user TEXT;
     """,
+    # version 8: GitLab URL per user (Profile): where the user's own token is tested and the profile is read
+    """
+    ALTER TABLE users ADD COLUMN gitlab_url TEXT;
+    """,
 ]
 CONFIG_DEFAULTS = {"port": 8787, "check_interval_hours": 6}
 
@@ -401,3 +405,14 @@ def user_token_set(name, value):
     """value: encrypted token, or None to remove it."""
     with tx() as c:
         c.execute("UPDATE users SET gitlab_token = ? WHERE name = ?", (value, name))
+
+
+def user_gitlab_url(name):
+    r = _rows("SELECT gitlab_url FROM users WHERE name = ?", (name,))
+    return r[0]["gitlab_url"] if r else None
+
+
+def user_gitlab_url_set(name, url):
+    """url: GitLab base URL of the user (https://host), or None for the default."""
+    with tx() as c:
+        c.execute("UPDATE users SET gitlab_url = ? WHERE name = ?", (url, name))
