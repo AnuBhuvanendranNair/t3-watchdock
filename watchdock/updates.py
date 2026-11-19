@@ -3,7 +3,7 @@ import re
 import shlex
 
 from .alerts import notify_event
-from .core import config, log
+from .core import app_url, config, log
 from .t3monitor import T3M_ENVS, t3m_cfg, t3m_key, t3m_view
 
 # composer package name / plain version; values come from the remote site, so they must match before
@@ -44,7 +44,7 @@ def send_update_commands(results):
     for p, env, r in results:
         if env == "staging" or p["id"] not in by_project:
             by_project[p["id"]] = (p, r)
-    port, sent = int(config().get("port", 8787)), []
+    sent = []
     for p, r in by_project.values():
         if not r["new_upd"]:
             continue
@@ -65,7 +65,7 @@ def send_update_commands(results):
             ("No update can be automated: check the updates below and update manually." if p.get("ref") else
              "No git branch configured for this project: update manually.")
         notify_event(f"Extension updates: {p['name']}", intro, facts,
-                     f"http://127.0.0.1:{port}/", "Open launcher", code=cmd)
+                     app_url(), "Open T3 Watchdock", code=cmd)
         log(f"Update commands sent: {p['name']} ({len(minor)} minor/patch, {len(major)} major)")
         sent.append(p["name"])
     return sent

@@ -1112,6 +1112,13 @@ function viewSettings() {
   $("#view").innerHTML = `
     <div class="profile stack">
       <h1 class="pf-title">Settings</h1>
+      ${pfSec("ext", "Address", "Where T3 Watchdock is reached. Used for the links in Teams and email messages.", `
+        <form id="urlform" class="pf-form">
+          <div class="full"><label for="pu-url">Public URL</label>
+            <input id="pu-url" name="url" type="url" value="${esc(S.public_url || "")}" placeholder="https://local-gitlabrunner.local">
+            <p class="pf-note">Empty: links point to http://127.0.0.1:8787 and only work on the computer running T3 Watchdock.</p></div>
+          <div class="actions"><span class="pf-spacer"></span><button class="btn" type="submit">Save</button></div>
+        </form>`)}
       ${pfSec("chat", "Microsoft Teams", "Notifications via incoming webhook", `
         <form id="msform" class="pf-form">
           <label class="pf-toggle full"><span>Send Teams messages</span><input type="checkbox" class="switch" role="switch" name="enabled" ${S.teams.enabled ? "checked" : ""}></label>
@@ -1187,6 +1194,11 @@ function viewSettings() {
   $("#msform").onsubmit = async ev => {
     ev.preventDefault();
     try { await saveTeams(); toast("Teams settings saved"); closeAfter(ev); } catch (e) { toast(e.message, true); }
+  };
+  $("#urlform").onsubmit = async ev => {
+    ev.preventDefault();
+    try { await api("/api/public-url", {url: ev.target.url.value}); await refresh(); viewSettings(); toast("Address saved"); }
+    catch (e) { toast(e.message, true); }
   };
   $("#eform").onsubmit = async ev => {
     ev.preventDefault();

@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-from .core import DATA, SEVERITY, T3M_DIR, T3M_KEEP, T3M_REPORTS, config, load, lock, log, now, save, write_secret
+from .core import DATA, app_url, SEVERITY, T3M_DIR, T3M_KEEP, T3M_REPORTS, config, load, lock, log, now, save, write_secret
 from .alerts import notify_event
 from .extensions import t3m_add_updates
 
@@ -67,7 +67,10 @@ def t3m_history_file(pid, env="production"):
 def t3m_decrypt(key, raw):
     """Same derivation as BrainAppeal\\T3monitor\\Helper\\Encryption::decryptOpenSsl."""
     if not raw.startswith("01:"):
-        raise RuntimeError(f"Unexpected t3monitor answer: {raw[:200]}")
+        head = raw[:200].strip()
+        if head[:1] == "<":                    # HTML page: login, maintenance or error page instead of t3monitor
+            raise RuntimeError("Got a web page instead of t3monitor data (wrong URL, login or maintenance page?)")
+        raise RuntimeError("Unexpected t3monitor answer: " + (head or "empty response"))
     k = hashlib.sha256(key[32:48].encode()).hexdigest()
     iv = hashlib.sha256(k[16:].encode()).hexdigest()[:16]
     r = subprocess.run(["openssl", "enc", "-d", "-aes-128-cbc", "-K", k[:16].encode().hex(),
@@ -298,8 +301,8 @@ def t3m_new_errors(prev, data):
 
 
 def t3m_launcher_link(pid):
-    """Link to the project page (localhost only; reachable from the machine running the launcher)."""
-    return f"http://127.0.0.1:{int(config().get('port', 8787))}/#/p/{urllib.parse.quote(pid)}"
+    """Link to the project page (public URL setting, else localhost)."""
+    return app_url(f"#/p/{urllib.parse.quote(pid)}")
 
 
 def t3m_view(pid, env="production"):

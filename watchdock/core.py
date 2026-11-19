@@ -67,6 +67,12 @@ def save_config(cfg):
     _save(cfg)
 
 
+def app_url(path=""):
+    """Address of T3 Watchdock for links in Teams/email messages: setting "public_url", else localhost."""
+    base = (config().get("public_url") or "").strip() or f"http://127.0.0.1:{int(config().get('port', 8787))}"
+    return base.rstrip("/") + "/" + path.lstrip("/")
+
+
 def log(msg):
     t = now()
     print(f"[{t}] {msg}", flush=True)

@@ -2,6 +2,7 @@
 import functools
 import json
 import os
+import re
 import sys
 import threading
 import urllib.parse
@@ -168,6 +169,7 @@ def state():
         "email_password_set": bool(smtp_password()),
         "teams": teams_cfg(),
         "teams_url_set": bool(teams_url()),
+        "public_url": config().get("public_url", ""),
         "t3monitor_keys": [p["id"] for p in cfg["projects"] if t3m_key(p["id"])],
         "t3monitor_auth": [p["id"] for p in cfg["projects"] if t3m_auth_password(p["id"])],
         "t3monitor_staging_keys": [p["id"] for p in cfg["projects"] if t3m_key(p["id"], "staging")],
@@ -388,6 +390,19 @@ def teams_test():
            "channel, check the run history of the Workflow in Teams (Workflows → the flow → Run history).")
     log(msg)
     return ok({"msg": msg})
+
+
+@app.post("/api/public-url")
+def public_url():
+    url = (body().get("url") or "").strip().rstrip("/")
+    if url and (not re.match(r"^https?://[^\s/]+(/\S*)?$", url)):
+        raise RuntimeError("Address must start with http:// or https:// and contain no spaces")
+    with lock:
+        cfg = config()
+        cfg["public_url"] = url
+        save_config(cfg)
+    log(f"Public URL set to {url or '(default)'}")
+    return ok({"public_url": url})
 
 
 @app.post("/api/email")
