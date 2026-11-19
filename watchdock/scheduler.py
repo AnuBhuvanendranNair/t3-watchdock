@@ -5,7 +5,7 @@ import re
 import sys
 import threading
 
-from .core import config, load, lock, log, now, save, save_config, stop_event
+from .core import app_url, config, load, lock, log, now, save, save_config, stop_event
 from .db import kv_get, kv_set, sched_result_set, sched_results, typo3_latest
 from .alerts import notify_event
 from .security import advisories, php_cycles, php_status, site_advisories, site_packages, typo3_security_feed
@@ -30,19 +30,51 @@ def task_typo3_release():
     return "Latest: " + ", ".join(f"TYPO3 {m}: {v}" for m, v in sorted(latest.items()))
 
 
+def _grouped(rows):
+    """Show site and environment only when they change, so rows of one site read as a group."""
+    out, prev = [], (None, None)
+    for r in rows:
+        key = (r[0], r[1])
+        out.append(([r[0], r[1]] if key[0] != prev[0] else ["", r[1]] if key != prev else ["", ""]) + r[2:])
+        prev = key
+    return out
+
+
+def _explain_failure(err):
+    """Plain-language problem and next step for a failed t3monitor check."""
+    low = err.lower()
+    if "encryption key" in low:
+        return "The site rejects the t3monitor key", "Compare the key in the t3monitor extension with the one in T3 Watchdock"
+    if "timed out" in low or "timeout" in low:
+        return "The site did not answer in time", "Check that the site is online and not overloaded"
+    if "web page instead" in low:
+        return "The site showed a web page instead of status data", "Check the t3monitor URL and Basic auth login"
+    if "empty response" in low:
+        return "The site sent an empty answer", "Check that the t3monitor extension is installed and active"
+    if "http 401" in low or "http 403" in low:
+        return "Access denied", "Check the Basic auth login and the t3monitor key"
+    if "http 404" in low:
+        return "t3monitor not found at this URL", "Check the t3monitor URL"
+    if "not resolve" in low or "name or service" in low or "nodename" in low:
+        return "Site address not found", "Check the URL and DNS"
+    return err[:150], "Open the site in T3 Watchdock and run the check again"
+
+
 def task_t3monitor():
     sites = [(p, env) for p in config()["projects"] for env in T3M_ENVS
              if t3m_cfg(p, env).get("url") and t3m_key(p["id"], env)]
     if not sites:
         return "No project with t3monitor URL and key"
-    failed, facts, totals, results = [], [], {"err": 0, "upd": 0, "new": 0}, []
+    failed, totals, results = [], {"err": 0, "upd": 0, "new": 0}, []
+    sec_failed, sec_new, sec_status, sec_upd = [], [], [], []
     for p, env in sites:
-        name = f"{p['name']} ({T3M_ENVS[env]['label']})"
+        label = T3M_ENVS[env]["label"]
         try:
             r = t3m_fetch(p, env, alert=False)
         except Exception as e:
-            failed.append(f"{name}: {e}")
-            facts.append((name, f"❌ CHECK FAILED: {e}"))
+            failed.append(f"{p['name']} · {label}: {e}")
+            problem, todo = _explain_failure(str(e))
+            sec_failed.append([p["name"], label, {"text": problem, "sub": todo, "tone": "bad"}])
             continue
         results.append((p, env, r))
         d, sev = r["data"], [x.get("severity") for x in r["data"].get("status", [])]
@@ -50,18 +82,48 @@ def task_t3monitor():
         totals["err"] += sev.count(2)
         totals["upd"] += len(upd)
         totals["new"] += len(r["new_err"]) + len(r["new_upd"])
-        line = [f"TYPO3 {d.get('typo3') or '?'}", _n(sev.count(2), "error"), _n(sev.count(1), "warning")]
-        if r["new_err"]:
-            line.append("NEW errors: " + ", ".join(x["title"] for x in r["new_err"][:5]))
-        line.append("updates: " + ("; ".join(("NEW " if k in r["new_upd"] else "") + f"{k} {_upd_text(e)}"
-                                              for k, e in upd.items()) if upd else "none"))
-        facts.append((name, " · ".join(line)))
+        n_err, n_warn = sev.count(2), sev.count(1)
+        sec_status.append([p["name"], label, {"text": d.get("typo3") or "?", "mono": True},
+                           {"text": n_err, "num": True, "tone": "bad" if n_err else "muted"},
+                           {"text": n_warn, "num": True, "tone": "warn" if n_warn else "muted"}])
+        for x in r["new_err"][:5]:
+            sec_new.append([p["name"], label, x["title"]])
+        for k, e in upd.items():
+            ext = {"text": k, "mono": True}
+            if e.get("major"):
+                ext.update(tag="Major")
+            elif k in r["new_upd"]:
+                ext.update(tag="New", tag_tone="ok")
+            sec_upd.append([p["name"], label, ext, {"text": f"{str(e['version']).lstrip('v')} → "
+                                                            f"{str(e['latest']).lstrip('v')}", "mono": True}])
     head = [_n(len(sites), "site"), _n(totals["err"], "error"), _n(totals["upd"], "extension update")]
     if failed:
         head.insert(1, f"{len(failed)} FAILED")
+    if failed:
+        headline = f"{_n(len(failed), 'site')} could not be checked"
+    elif sec_new:
+        headline = f"{_n(len(sec_new), 'new error')} since the last check"
+    else:
+        headline = f"All {_n(len(sites), 'site')} checked"
+    W = ["30%", "16%"]                         # same Site / Environment column widths in every table
     notify_event("t3monitor check: " + " · ".join(head),
-                 "Scheduled TYPO3 status check" + (f" – {totals['new']} new finding(s)." if totals["new"] else "."),
-                 facts, f"http://127.0.0.1:{int(config().get('port', 8787))}/", "Open launcher")
+                 "Scheduled TYPO3 status check of every site with t3monitor.", [],
+                 app_url(), "Open T3 Watchdock",
+                 headline=headline,
+                 stats=[("Sites checked", len(sites), None),
+                        ("Not reachable", len(failed), "bad" if failed else "muted"),
+                        ("TYPO3 errors", totals["err"], "bad" if totals["err"] else "muted"),
+                        ("Updates", totals["upd"], "warn" if totals["upd"] else "muted")],
+                 sections=[
+                     {"title": "Could not be checked", "note": "These sites gave no usable answer.",
+                      "widths": W, "cols": ["Site", "Environment", "Problem"], "rows": _grouped(sec_failed)},
+                     {"title": "New errors since the last check",
+                      "widths": W, "cols": ["Site", "Environment", "Error"], "rows": _grouped(sec_new)},
+                     {"title": "Extension updates",
+                      "note": "Major updates can change behaviour. Test them on staging first.",
+                      "widths": W, "cols": ["Site", "Environment", "Extension", "Version"], "rows": _grouped(sec_upd)},
+                     {"title": "Status per site", "note": "Errors and warnings from the TYPO3 system status.",
+                      "widths": W, "cols": ["Site", "Environment", "TYPO3", "Errors", "Warnings"], "rows": _grouped(sec_status)}])
     try:
         send_update_commands(results)
     except Exception as e:                     # never fail the status check because of the extra message
@@ -111,7 +173,7 @@ def task_security():
     summary = f"{_n(len(sites), 'site')} · {n_adv} security {'advisory' if n_adv == 1 else 'advisories'} · {_n(n_php, 'PHP issue')}"
     if n_new:
         notify_event(f"Security check: {n_new} new finding(s)", "Scheduled PHP version and security advisory check.",
-                     facts, f"http://127.0.0.1:{int(config().get('port', 8787))}/", "Open launcher")
+                     facts, app_url(), "Open T3 Watchdock")
     return summary + (f" · {n_new} new" if n_new else "")
 
 
