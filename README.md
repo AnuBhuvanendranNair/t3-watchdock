@@ -66,6 +66,8 @@ Python web app ([Flask](https://flask.palletsprojects.com), served by [Gunicorn]
 git clone git@github.com:sivaprasad1988/t3-watchdock.git
 cd t3-watchdock
 cp config.example.json config.json   # optional — imported into watchdock.db on first start; projects can also be added in the UI
+# once: key that encrypts the GitLab tokens, outside the data folder (Docker reads it as a secret, see "GitLab tokens")
+python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())" > ~/.t3-watchdock-secret-key && chmod 600 ~/.t3-watchdock-secret-key
 docker compose up -d --build         # runs permanently, see "Run with Docker"
 ```
 
@@ -76,7 +78,7 @@ bin/t3-watchdock add-user NAME                                # asks for the pas
 docker compose exec launcher bin/t3-watchdock add-user NAME   # same in Docker
 ```
 
-Open <http://127.0.0.1:8787>, sign in, save your GitLab token in *Settings → GitLab token*, add projects.
+Open <http://127.0.0.1:8787>, sign in, save your GitLab token in *Profile → GitLab token*, add projects. For the scheduler and TYPO3 watcher, an admin (`bin/t3-watchdock set-admin NAME on`) saves a service token in *Settings → GitLab service token*.
 
 Without Docker (runs only while the terminal is open):
 
@@ -106,7 +108,9 @@ bin/t3-watchdock add-user NAME        # new account, asks for the password twice
 bin/t3-watchdock set-password NAME    # new password, signs the user out everywhere
 bin/t3-watchdock remove-user NAME     # delete account and its sessions
 bin/t3-watchdock unlock-user NAME     # unlock after 3 failed logins
-bin/t3-watchdock list-users           # names, creation dates, locked accounts
+bin/t3-watchdock list-users           # names, creation dates, admins, own GitLab token, locked accounts
+bin/t3-watchdock set-admin NAME on    # admins manage the GitLab service token (off: set-admin NAME off)
+bin/t3-watchdock gen-secret-key       # print a new key for WATCHDOCK_SECRET_KEY
 ```
 
 - **`bin/t3-watchdock`** without a command lists all commands. `bin/t3-watchdock start [--no-watch]` starts the app (same as `python3 app.py`); `config …` and the account commands work as with `app.py`. Works from any directory and through a symlink. When T3 Watchdock is installed with Composer, it is available as `vendor/bin/t3-watchdock` (needs `"bin": ["bin/t3-watchdock"]` in a `composer.json`; this repository has none yet).
@@ -234,12 +238,14 @@ Staging and production run independently: the launcher no longer requires a succ
 
 In the project form, the production branch is pre-filled from GitLab (`production` if it exists, otherwise the default branch) and the production auto-play jobs mirror the staging ones until edited. Run all and the TYPO3 auto-trigger never touch production.
 
-## GitLab token
+## GitLab tokens
 
-- Stored via the UI in `.gitlab-token` in the app folder (file mode `600`)
-- Fallback: `~/.gitlab-token`
-- Read server-side only, never sent to the browser
-- Can be tested and removed in the UI
+- **Personal token** — every user saves their own in *Profile → GitLab token*. Pipelines and jobs started in the browser (run, promote, production, play, auto-play of manual jobs) use it, so GitLab shows who started what. Without one, these actions are refused; read-only views fall back to the service token.
+- **Service token** — one for the app, saved by an admin in *Settings → GitLab service token*. Used when no user is signed in: scheduler, TYPO3 watcher, pipeline mail watches. Prefer a project or group access token limited to the needed projects, with an expiry date (`api` scope is needed to play manual jobs).
+- Both are stored encrypted (Fernet, package `cryptography`) in `watchdock.db`, read server-side only, never sent to the browser or exported. They can be tested and removed in the UI.
+- **Key** — kept outside the data folder, so a copy of the database alone does not reveal the tokens. First match wins: `WATCHDOCK_SECRET_KEY` (the key), `WATCHDOCK_SECRET_KEY_FILE` (path to it; Docker uses this with the secret `~/.t3-watchdock-secret-key` from the host, see `compose.yaml`), else `~/.t3-watchdock-secret-key` (created on first local start, mode `600`). A lost or changed key makes the stored tokens unreadable: save them again. Back up the key separately from the database.
+- **Upgrade** — on first start, an existing `.gitlab-token` in the app folder is imported as the encrypted service token and the plaintext file is deleted. `~/.gitlab-token` is imported if no service token exists yet, but left in place (delete it yourself).
+- **Docker upgrade** — create `~/.t3-watchdock-secret-key` first (command in *Quick start*) — the container reads it as a Docker secret.
 
 ## Run with Docker (always on)
 
@@ -254,7 +260,7 @@ Two containers:
 - **`t3-watchdock-proxy`** ([Traefik](https://traefik.io) `v3.7.13`, own container, separate from other projects' Traefik): the only part with published ports. HTTPS, timeouts, request size limit, rate limit, security headers. Routes are in `traefik/dynamic.yml` (file provider, no Docker socket).
 - **`t3-watchdock`** (the app): no published port, reachable only through the proxy on the internal network `backend`.
 
-Open <http://127.0.0.1:8787>. All data — `watchdock.db`, `t3monitor/` and the secret files (`.gitlab-token`, `.teams-webhook`, `.smtp-password`, `*.t3monitor-key`, `*.t3monitor-auth`, `*.t3monitor-staging-key`, `*.t3monitor-staging-auth`) — is read from and written to this folder (mounted as `/data`), so it survives rebuilds.
+Open <http://127.0.0.1:8787>. All data — `watchdock.db`, `t3monitor/` and the secret files (`.teams-webhook`, `.smtp-password`, `*.t3monitor-key`, `*.t3monitor-auth`, `*.t3monitor-staging-key`, `*.t3monitor-staging-auth`) — is read from and written to this folder (mounted as `/data`), so it survives rebuilds.
 
 | Task | Command |
 |---|---|
@@ -364,7 +370,7 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 - Optional HTTPS with a local mkcert certificate
 - `Host` header check against DNS rebinding
 - `Origin` check and `application/json` requirement on POST against cross-site requests
-- Secrets (GitLab token, Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form; the project export file contains t3monitor keys and Basic auth passwords in plain text. Both work only on a same-origin HTTPS or localhost request
+- GitLab tokens are stored encrypted in the database, the key outside the data folder (see *GitLab tokens*). Other secrets (Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form; the project export file contains t3monitor keys and Basic auth passwords in plain text. Both work only on a same-origin HTTPS or localhost request
 - Token, secrets, config, state, t3monitor history and logs are gitignored
 - Outgoing connections: GitLab (only to the GitLab URLs of configured projects), `get.typo3.org`, `news.typo3.com` (security feed), the Teams webhook / SMTP server if enabled, the t3monitor site URLs, `repo.packagist.org` (only public Composer package names are sent), and — when a changelog is opened — `api.github.com`, `raw.githubusercontent.com` or `gitlab.com` (public repository paths and tags only)
 
@@ -378,7 +384,8 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 | `watchdock/core.py` | Paths, settings, shared state, JSON storage |
 | `watchdock/db.py` | SQLite storage: projects, settings, runs, log, scheduler results, TYPO3 baselines, pending notifications, users, sessions |
 | `watchdock/alerts.py` | E-mail and Microsoft Teams notifications |
-| `watchdock/gitlab.py` | GitLab API: token, pipelines, manual jobs, project lookup |
+| `watchdock/gitlab.py` | GitLab API: tokens (per user + service token), pipelines, manual jobs, project lookup |
+| `watchdock/crypto.py` | Encryption of the stored GitLab tokens (key outside the data folder) |
 | `watchdock/extensions.py` | Extension update check (Packagist) and changelogs |
 | `watchdock/t3monitor.py` | t3monitor client, history, change detection |
 | `watchdock/watcher.py` | TYPO3 release watcher, pipeline result mails |
@@ -386,7 +393,7 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 | `watchdock/scheduler.py` | Background scheduler |
 | `watchdock/server.py` | Flask app: API routes, Host / Origin checks, login check |
 | `gunicorn.conf.py` | Gunicorn settings (1 worker, threads, timeouts; starts the scheduler in the worker) |
-| `requirements.txt` | Python packages (Flask, Gunicorn), pinned |
+| `requirements.txt` | Python packages (Flask, Gunicorn, cryptography), pinned |
 | `watchdock/plugins.py` | Plugin loader (routes and browser files of enabled plugins) |
 | `static/` | Web UI (`index.html` with the icon sprite, `login.html`, `style.css`, `app.js`, `icons-LICENSE.txt`) |
 | `plugins/` | Optional plugins, off by default (see *Plugins*) |
@@ -394,8 +401,8 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 | `Dockerfile`, `compose.yaml` | Docker setup (app + Traefik proxy) |
 | `traefik/dynamic.yml` | Traefik routes, middlewares (limits, headers) and TLS certificate |
 | `certs/` | mkcert certificate + key (gitignored) |
-| `watchdock.db` | SQLite database (stdlib `sqlite3`, mode `600`): projects, settings, runs, log, TYPO3 baselines, scheduler results, pending notifications, user accounts (password hashes) and sessions (gitignored). On first start an existing `config.json` / `state.json` is imported and renamed to `<name>.imported-<time>` (backup) |
-| `.gitlab-token` | GitLab token (gitignored) |
+| `watchdock.db` | SQLite database (stdlib `sqlite3`, mode `600`): projects, settings, runs, log, TYPO3 baselines, scheduler results, pending notifications, user accounts (password hashes, admin flag, encrypted GitLab tokens), encrypted service token and sessions (gitignored). On first start an existing `config.json` / `state.json` is imported and renamed to `<name>.imported-<time>` (backup) |
+| `.gitlab-token` | Legacy plaintext GitLab token: imported encrypted on start, then deleted (gitignored) |
 | `.smtp-password` | SMTP password (gitignored) |
 | `.teams-webhook` | Teams webhook URL (gitignored) |
 | `*.t3monitor-key` | t3monitor key per project (gitignored) |

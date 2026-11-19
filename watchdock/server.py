@@ -10,11 +10,11 @@ from flask import Flask, Response, g, redirect, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from .core import ALLOWED_HOSTS, BASE, BEHIND_PROXY, TOKEN_FILE, config, lock, log, now, save_config, stop_event
+from .core import ALLOWED_HOSTS, BASE, BEHIND_PROXY, config, lock, log, now, save_config, stop_event
 from . import auth, db
 from .alerts import email_cfg, save_email, save_teams, send_mail, send_teams, smtp_password, teams_cfg, teams_url
 from .extensions import ext_changelog, ext_release
-from .gitlab import find_project, gitlab, last_run_status, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, test_token, token_source
+from .gitlab import delete_token, find_project, gitlab, import_token_files, last_run_status, project_info, promote, require_ci, run_pipeline, run_production, save_token, search_projects, set_user, test_token, token_status
 from .t3monitor import T3M_ENVS, t3m_auth_file, t3m_auth_password, t3m_env, t3m_fetch, t3m_key, t3m_key_file, t3m_summary, t3m_view
 from .watcher import resume_mail_watches
 from .projects import add_project, export_projects, import_projects, update_monitoring, update_project
@@ -48,6 +48,10 @@ def start_background():
         if _started:
             return
         _started = True
+    try:
+        import_token_files()                # former plaintext .gitlab-token -> encrypted service token
+    except Exception as e:
+        log(f"GitLab token import failed: {e}")
     resume_mail_watches()
     threading.Thread(target=scheduler, daemon=True).start()
 
@@ -120,6 +124,7 @@ def guard():
     if request.method == "POST" and not request.headers.get("Content-Type", "").startswith("application/json"):
         return send(403, {"error": "forbidden"})
     g.user = auth.session_user(request.cookies.get(auth.COOKIE))
+    set_user(g.user)                         # GitLab calls of this request use this user's token
     if g.user or (request.method, request.path) in PUBLIC:
         return None
     if request.method == "GET" and not request.path.startswith(("/api/", "/plugins/")):
@@ -158,9 +163,10 @@ def state():
     cfg = config()
     return ok({
         "user": g.user,
+        "admin": db.user_is_admin(g.user),
         "projects": cfg["projects"],
         "scheduler": sched_view(),
-        "token_source": token_source()[0],
+        "gitlab_token": token_status(g.user),
         "email": email_cfg(),
         "email_password_set": bool(smtp_password()),
         "teams": teams_cfg(),
@@ -318,21 +324,50 @@ def play():
     return ok(r)
 
 
-@app.post("/api/token")
+def _admin():
+    if not db.user_is_admin(g.user):
+        raise PermissionError("Only an admin can change the service token (t3-watchdock set-admin NAME on)")
+
+
+@app.errorhandler(PermissionError)
+def forbidden(e):
+    return send(403, {"error": str(e)})
+
+
+@app.post("/api/token")                              # own GitLab token (Profile)
 def token():
-    save_token(body().get("token"))
-    return ok({"msg": test_token()})
+    save_token(g.user, body().get("token"))
+    return ok({"msg": test_token(g.user)})
 
 
 @app.post("/api/token/test")
 def token_test():
-    return ok({"msg": test_token()})
+    return ok({"msg": test_token(g.user)})
 
 
 @app.post("/api/token/delete")
 def token_delete():
-    TOKEN_FILE.unlink(missing_ok=True)
-    log("GitLab token removed from app folder")
+    delete_token(g.user)
+    return ok({"ok": True})
+
+
+@app.post("/api/token/service")                      # service token for scheduler / watcher (Settings, admin only)
+def service_token():
+    _admin()
+    save_token(None, body().get("token"))
+    return ok({"msg": test_token(None)})
+
+
+@app.post("/api/token/service/test")
+def service_token_test():
+    _admin()
+    return ok({"msg": test_token(None)})
+
+
+@app.post("/api/token/service/delete")
+def service_token_delete():
+    _admin()
+    delete_token(None)
     return ok({"ok": True})
 
 

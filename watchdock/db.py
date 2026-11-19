@@ -52,6 +52,12 @@ SCHEMA = [
     ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT '';
     """,
+    # version 6: one encrypted GitLab token per user, admin flag (CLI), encrypted app secrets (service token)
+    """
+    ALTER TABLE users ADD COLUMN admin INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN gitlab_token TEXT;
+    CREATE TABLE secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL);
+    """,
 ]
 CONFIG_DEFAULTS = {"port": 8787, "check_interval_hours": 6}
 
@@ -306,7 +312,7 @@ def user_get(name):
 
 
 def users():
-    return _rows("SELECT name, created, locked FROM users ORDER BY name")
+    return _rows("SELECT name, created, locked, admin, gitlab_token IS NOT NULL AS has_token FROM users ORDER BY name")
 
 
 def user_add(name, pw_hash):
@@ -371,3 +377,40 @@ def sessions_delete_user(user, keep=None):
     """All sessions of a user, except the one with token hash `keep`."""
     with tx() as c:
         c.execute("DELETE FROM sessions WHERE user = ? AND token_hash IS NOT ?", (user, keep))
+
+
+def user_is_admin(name):
+    r = _rows("SELECT admin FROM users WHERE name = ?", (name,))
+    return bool(r and r[0]["admin"])
+
+
+def user_set_admin(name, admin):
+    with tx() as c:
+        return c.execute("UPDATE users SET admin = ? WHERE name = ?", (int(bool(admin)), name)).rowcount > 0
+
+
+# ---------------------------------------------------------------- GitLab tokens (values encrypted, see crypto.py)
+def user_token(name):
+    r = _rows("SELECT gitlab_token FROM users WHERE name = ?", (name,))
+    return r[0]["gitlab_token"] if r else None
+
+
+def user_token_set(name, value):
+    """value: encrypted token, or None to remove it."""
+    with tx() as c:
+        c.execute("UPDATE users SET gitlab_token = ? WHERE name = ?", (value, name))
+
+
+def secret_get(name):
+    r = _rows("SELECT value FROM secrets WHERE name = ?", (name,))
+    return r[0]["value"] if r else None
+
+
+def secret_set(name, value):
+    """value: encrypted secret, or None to remove it."""
+    with tx() as c:
+        if value is None:
+            c.execute("DELETE FROM secrets WHERE name = ?", (name,))
+        else:
+            c.execute("INSERT INTO secrets (name, value) VALUES (?, ?) "
+                      "ON CONFLICT (name) DO UPDATE SET value = excluded.value", (name, value))

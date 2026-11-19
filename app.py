@@ -4,7 +4,8 @@
 - Lists GitLab projects, runs pipelines, shows jobs, plays manual jobs.
 - Background check of the TYPO3 release API; on a new release it triggers the
   pipelines of all projects with "auto_typo3.enabled" (intended: staging only).
-- Token is read server-side from ~/.gitlab-token and never sent to the browser.
+- GitLab tokens (one per user + a service token for background work) are stored encrypted in watchdock.db
+  and never sent to the browser (key: see watchdock/crypto.py).
 - Projects, settings, runs and log are stored in the SQLite database watchdock.db.
 
 Code lives in the watchdock/ package, the web UI in static/.
@@ -16,6 +17,8 @@ Settings without a UI (e.g. plugins, port) are changed on the command line:
 
 Login accounts (also as bin/t3-watchdock …):
     python3 app.py add-user NAME | set-password NAME | remove-user NAME | unlock-user NAME | list-users
+    python3 app.py set-admin NAME on|off      (admins manage the GitLab service token)
+    python3 app.py gen-secret-key              (prints a new key for WATCHDOCK_SECRET_KEY)
 """
 import json
 import sys
@@ -48,7 +51,7 @@ def config_cli(args):
     print(f"{rest[0]} {'saved' if cmd == 'set' else 'removed'}")
 
 
-USER_CMDS = ("add-user", "set-password", "remove-user", "unlock-user", "list-users")
+USER_CMDS = ("add-user", "set-password", "remove-user", "unlock-user", "list-users", "set-admin")
 
 
 def user_cli(cmd, args):
@@ -56,7 +59,15 @@ def user_cli(cmd, args):
     from watchdock import auth, db
     if cmd == "list-users":
         for u in db.users():
-            print(f"{u['name']}\t{u['created']}" + (f"\tLOCKED since {u['locked']}" if u["locked"] else ""))
+            print(f"{u['name']}\t{u['created']}" + ("\tadmin" if u["admin"] else "")
+                  + ("\tGitLab token" if u["has_token"] else "") + (f"\tLOCKED since {u['locked']}" if u["locked"] else ""))
+        return
+    if cmd == "set-admin":
+        if len(args) != 2 or args[1] not in ("on", "off"):
+            sys.exit("usage: set-admin NAME on|off")
+        if not db.user_set_admin(args[0], args[1] == "on"):
+            sys.exit(f"No such user: {args[0]}")
+        print(f"Admin {args[1]}: {args[0]}")
         return
     if len(args) != 1:
         sys.exit(f"usage: {cmd} NAME")
@@ -85,6 +96,9 @@ def user_cli(cmd, args):
 if __name__ == "__main__":
     if sys.argv[1:2] == ["config"]:
         config_cli(sys.argv[2:])
+    elif sys.argv[1:2] == ["gen-secret-key"]:
+        from watchdock.crypto import new_key
+        print(new_key())
     elif sys.argv[1:2] and sys.argv[1] in USER_CMDS:
         user_cli(sys.argv[1], sys.argv[2:])
     else:

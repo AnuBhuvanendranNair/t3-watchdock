@@ -103,8 +103,11 @@ async function refresh() {
   const lo = $("#logoutBtn"); lo.title = `Sign out ${S.user}`; lo.setAttribute("aria-label", lo.title);
   const pb = $("#profileBtn"); pb.title = `Profile: ${S.user}`; pb.setAttribute("aria-label", pb.title);
   const pill = $("#tokenPill");
-  pill.textContent = S.token_source ? "Token ✓" : "No token";
-  pill.className = "pill" + (S.token_source ? "" : " bad");
+  const tk = S.gitlab_token || {};
+  pill.textContent = tk.own ? "Token ✓" : "No token";
+  pill.className = "pill" + (tk.own ? "" : " bad");
+  pill.title = tk.own ? "Your GitLab token is stored" : "No personal GitLab token: add it in your Profile"
+    + (tk.service ? " (reads use the service token, pipelines and jobs need your own)" : "");
 }
 
 /* ---------------- router ---------------- */
@@ -1108,19 +1111,19 @@ function viewActivity() {
 }
 
 function viewSettings() {
-  const src = {app:"Stored in the app folder (.gitlab-token, chmod 600). It is never shown again.",
-    home:"Using ~/.gitlab-token (fallback). Save a token here to store it in the app folder."}[S.token_source] || "No token stored.";
+  const svc = S.gitlab_token?.service ? "Stored encrypted. It is never shown again." : "No service token stored.";
   const m = S.email;
   $("#view").innerHTML = `
     <div class="head"><h1>Settings</h1></div>
     <div class="stack">
-      <div class="card"><h2>GitLab token</h2><p class="sub" style="margin:0 0 12px">${esc(src)}</p>
-        <form id="tform" class="fields">
-          <div><label>Personal access token (scope: api)</label><input name="token" type="password" autocomplete="off" placeholder="glpat-…" required></div>
+      <div class="card"><h2>GitLab service token</h2>
+        <p class="sub" style="margin:0 0 12px" data-secondary-copy>Used by the scheduler, the TYPO3 watcher and pipeline mail watches (no user signed in), and for reads of users without an own token. Pipelines you start in the browser use your own token from your <a href="#/profile">Profile</a>. ${esc(svc)}</p>
+        ${S.admin ? `<form id="tform" class="fields">
+          <div><label>Project / group access token (scope: api)</label><input name="token" type="password" autocomplete="off" placeholder="glpat-…" required></div>
           <div class="actions" style="align-items:end"><button class="btn" type="submit">Save token</button><button class="btn sec" type="submit" data-close="1">Save &amp; close</button>
-            <button class="btn sec" type="button" data-act="tokentest">Test</button>
-            <button class="btn danger" type="button" data-act="tokendel">Remove</button></div>
-        </form></div>
+            <button class="btn sec" type="button" data-act="tokentest" data-scope="service">Test</button>
+            <button class="btn danger" type="button" data-act="tokendel" data-scope="service">Remove</button></div>
+        </form>` : `<p class="sub" style="margin:0">Only an admin can change it (t3-watchdock set-admin NAME on).</p>`}</div>
       <div class="card"><h2>Microsoft Teams notifications</h2>
         <p class="sub" style="margin:0 0 12px" data-secondary-copy>Posts a message to a Teams channel when a pipeline started automatically by the TYPO3 watcher has finished (or could not be started).</p>
         ${!S.teams_url_set ? `<p class="sub">Create the webhook in Teams: channel → ⋯ → Workflows → "Post to a channel when a webhook request is received".</p>` : ""}
@@ -1167,9 +1170,9 @@ function viewSettings() {
         <dt>Latest</dt><dd>${Object.entries(S.typo3_latest).map(([m, v]) => `TYPO3 ${esc(m)}: ${esc(v)}`).join(", ") || "–"}</dd>
       </dl><div style="margin-top:12px"><button class="btn sec" data-act="check">Check now</button></div></div>
     </div>`;
-  $("#tform").onsubmit = async ev => {
+  if ($("#tform")) $("#tform").onsubmit = async ev => {
     ev.preventDefault();
-    try { const d = await api("/api/token", {token:ev.target.token.value}); ev.target.reset(); await refresh(); toast(d.msg); if (!closeAfter(ev)) viewSettings(); }
+    try { const d = await api("/api/token/service", {token:ev.target.token.value}); ev.target.reset(); await refresh(); toast(d.msg); if (!closeAfter(ev)) viewSettings(); }
     catch (e) { toast(e.message, true); }
   };
   $("#msform").onsubmit = async ev => {
@@ -1212,7 +1215,21 @@ async function viewProfile() {
           <p class="pf-hint full">At least 12 characters. Other sessions are signed out, this one stays. 3 wrong current passwords lock the account.</p>
           <div class="actions"><button class="btn" type="submit">Change password</button></div>
         </form></div>
+      <div class="card"><h2>GitLab token</h2>
+        <p class="pf-hint">Your personal access token (scope: api). Pipelines and jobs you start run as you in GitLab. ${S.gitlab_token?.own ? "Stored encrypted. It is never shown again." : "No token stored."}</p>
+        <form id="gtform" class="pf-form">
+          <input type="text" name="username" value="${esc(me.name)}" autocomplete="username" style="display:none">
+          <div class="full"><label for="gt-token">Personal access token</label><input id="gt-token" name="token" type="password" autocomplete="off" placeholder="glpat-…" required></div>
+          <div class="actions"><button class="btn" type="submit">Save token</button>
+            <button class="btn sec" type="button" data-act="tokentest">Test</button>
+            <button class="btn danger" type="button" data-act="tokendel">Remove</button></div>
+        </form></div>
     </div>`;
+  $("#gtform").onsubmit = async ev => {
+    ev.preventDefault();
+    try { const d = await api("/api/token", {token: ev.target.token.value}); ev.target.reset(); await refresh(); toast(d.msg); viewProfile(); }
+    catch (e) { toast(e.message, true); }
+  };
   $("#pfform").onsubmit = async ev => {
     ev.preventDefault();
     const f = ev.target;
@@ -1509,7 +1526,7 @@ const actions = {
     try { data = JSON.parse(await file.text()); } catch { return toast("The file is not valid JSON", true); }
     const list = Array.isArray(data?.projects) ? data.projects : [];
     const hosts = [...new Set(list.map(x => x?.project?.gitlab_url).filter(Boolean))];   // the GitLab token is sent to these hosts
-    if (!confirm(`Import ${list.length} projects${overwrite ? " and overwrite existing ones" : ""}?\n\nGitLab hosts in this file (your GitLab token is sent to them):\n${hosts.join("\n") || "–"}`)) return;
+    if (!confirm(`Import ${list.length} projects${overwrite ? " and overwrite existing ones" : ""}?\n\nGitLab hosts in this file (GitLab tokens are sent to them):\n${hosts.join("\n") || "–"}`)) return;
     el.disabled = true;
     try {
       const r = await api("/api/projects/import", {data, overwrite});
@@ -1517,10 +1534,16 @@ const actions = {
       toast(`Import: ${r.added.length} added, ${r.updated.length} updated, ${r.skipped.length} skipped`);
     } catch (e) { toast(e.message, true); el.disabled = false; }
   },
-  async tokentest() { try { toast((await api("/api/token/test", {})).msg); } catch (e) { toast(e.message, true); } },
-  async tokendel() {
-    if (!confirm("Remove the stored GitLab token?")) return;
-    try { await api("/api/token/delete", {}); await refresh(); viewSettings(); toast("Token removed"); } catch (e) { toast(e.message, true); }
+  async tokentest(el) {
+    const base = el.dataset.scope === "service" ? "/api/token/service" : "/api/token";
+    try { toast((await api(base + "/test", {})).msg); } catch (e) { toast(e.message, true); }
+  },
+  async tokendel(el) {
+    const service = el.dataset.scope === "service";
+    if (!confirm(service ? "Remove the GitLab service token? Scheduler and watcher stop working until a new one is saved."
+                         : "Remove your GitLab token?")) return;
+    try { await api((service ? "/api/token/service" : "/api/token") + "/delete", {}); await refresh();
+      service ? viewSettings() : viewProfile(); toast("Token removed"); } catch (e) { toast(e.message, true); }
   },
 };
 document.addEventListener("keydown", e => {

@@ -40,9 +40,15 @@ services:
       TZ: Europe/Berlin
       LAUNCHER_ALLOWED_HOSTS: local-gitlabrunner.local
       LAUNCHER_BEHIND_PROXY: "1"  # trust X-Forwarded-Proto / -For (set by Traefik)
+      WATCHDOCK_SECRET_KEY_FILE: /run/secrets/watchdock_secret_key   # encrypts the GitLab tokens
+    secrets: [watchdock_secret_key]
     volumes:
       - ./:/data                # watchdock.db and secret files stay in this folder
     networks: [backend]
+
+secrets:
+  watchdock_secret_key:         # outside the data folder; same file a local start uses (see README)
+    file: ${HOME}/.t3-watchdock-secret-key
 
 networks:
   backend: {}
