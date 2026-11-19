@@ -95,8 +95,7 @@ async function refresh() {
   const tk = S.gitlab_token || {};
   pill.textContent = tk.own ? "Token ✓" : "No token";
   pill.className = "pill" + (tk.own ? "" : " bad");
-  pill.title = tk.own ? "Your GitLab token is stored" : "No personal GitLab token: add it in your Profile"
-    + (tk.service ? " (reads use the service token, pipelines and jobs need your own)" : "");
+  pill.title = tk.own ? "Your GitLab token is stored" : "No personal GitLab token: add it in your Profile (needed for everything GitLab)";
 }
 
 /* ---------------- router ---------------- */
@@ -961,7 +960,7 @@ function viewForm(p) {
         <div><label>Name<span data-noci> *</span></label><input name="name" value="${esc(p?.name)}" placeholder="WVG Online"></div>
         <div><label for="pf-owner">Responsible person</label><select id="pf-owner" name="owner"><option value="">– none –</option>
           ${(S.users || []).map(u => `<option value="${esc(u.name)}" ${p?.owner === u.name ? "selected" : ""}>${esc(u.full_name ? `${u.full_name} (${u.name})` : u.name)}</option>`).join("")}</select>
-          <div class="hint">Shown with their GitLab picture on the project card.</div></div>
+          <div class="hint">Shown with their GitLab picture on the project card. Automatic TYPO3 updates run with their GitLab token.</div></div>
         <div><label>GitLab URL</label><input name="gitlab_url" value="${esc(v.gitlab_url || DEFAULTS.gitlab_url)}"></div>
         <div><label>Project path<span data-ci> *</span></label><input name="path" value="${esc(p?.path)}" placeholder="type to search GitLab…" list="projlist" autocomplete="off" required>
           <div class="hint" id="pinfo"></div></div>
@@ -1107,19 +1106,10 @@ function viewActivity() {
 }
 
 function viewSettings() {
-  const svc = S.gitlab_token?.service ? "Stored encrypted. It is never shown again." : "No service token stored.";
   const m = S.email;
   $("#view").innerHTML = `
     <div class="head"><h1>Settings</h1></div>
     <div class="stack">
-      <div class="card"><h2>GitLab service token</h2>
-        <p class="sub" style="margin:0 0 12px" data-secondary-copy>Used by the scheduler, the TYPO3 watcher and pipeline mail watches (no user signed in), and for reads of users without an own token. Pipelines you start in the browser use your own token from your <a href="#/profile">Profile</a>. ${esc(svc)}</p>
-        ${S.admin ? `<form id="tform" class="fields">
-          <div><label>Project / group access token (scope: api)</label><input name="token" type="password" autocomplete="off" placeholder="glpat-…" required></div>
-          <div class="actions" style="align-items:end"><button class="btn" type="submit">Save token</button><button class="btn sec" type="submit" data-close="1">Save &amp; close</button>
-            <button class="btn sec" type="button" data-act="tokentest" data-scope="service">Test</button>
-            <button class="btn danger" type="button" data-act="tokendel" data-scope="service">Remove</button></div>
-        </form>` : `<p class="sub" style="margin:0">Only an admin can change it (t3-watchdock set-admin NAME on).</p>`}</div>
       <div class="card"><h2>Microsoft Teams notifications</h2>
         <p class="sub" style="margin:0 0 12px" data-secondary-copy>Posts a message to a Teams channel when a pipeline started automatically by the TYPO3 watcher has finished (or could not be started).</p>
         ${!S.teams_url_set ? `<p class="sub">Create the webhook in Teams: channel → ⋯ → Workflows → "Post to a channel when a webhook request is received".</p>` : ""}
@@ -1166,11 +1156,6 @@ function viewSettings() {
         <dt>Latest</dt><dd>${Object.entries(S.typo3_latest).map(([m, v]) => `TYPO3 ${esc(m)}: ${esc(v)}`).join(", ") || "–"}</dd>
       </dl><div style="margin-top:12px"><button class="btn sec" data-act="check">Check now</button></div></div>
     </div>`;
-  if ($("#tform")) $("#tform").onsubmit = async ev => {
-    ev.preventDefault();
-    try { const d = await api("/api/token/service", {token:ev.target.token.value}); ev.target.reset(); await refresh(); toast(d.msg); if (!closeAfter(ev)) viewSettings(); }
-    catch (e) { toast(e.message, true); }
-  };
   $("#msform").onsubmit = async ev => {
     ev.preventDefault();
     try { await saveTeams(); toast("Teams settings saved"); closeAfter(ev); } catch (e) { toast(e.message, true); }
@@ -1249,7 +1234,7 @@ async function viewProfile() {
           <div class="actions"><button class="btn" type="submit">Change password</button></div>
         </form></div>
       <div class="card"><h2>GitLab token</h2>
-        <p class="pf-hint">Your personal access token (scope: api). Pipelines and jobs you start run as you in GitLab. ${S.gitlab_token?.own ? "Stored encrypted. It is never shown again." : "No token stored."}</p>
+        <p class="pf-hint">Your personal access token (scope: api). Everything you do with GitLab here runs as you, also the automatic TYPO3 updates of projects you are responsible for. ${S.gitlab_token?.own ? "Stored encrypted. It is never shown again." : "No token stored."}</p>
         <form id="gtform" class="pf-form">
           <input type="text" name="username" value="${esc(me.name)}" autocomplete="username" style="display:none">
           <div class="full"><label for="gt-token">Personal access token</label><input id="gt-token" name="token" type="password" autocomplete="off" placeholder="glpat-…" required></div>
@@ -1570,16 +1555,11 @@ const actions = {
       toast(`Import: ${r.added.length} added, ${r.updated.length} updated, ${r.skipped.length} skipped`);
     } catch (e) { toast(e.message, true); el.disabled = false; }
   },
-  async tokentest(el) {
-    const base = el.dataset.scope === "service" ? "/api/token/service" : "/api/token";
-    try { toast((await api(base + "/test", {})).msg); } catch (e) { toast(e.message, true); }
-  },
-  async tokendel(el) {
-    const service = el.dataset.scope === "service";
-    if (!confirm(service ? "Remove the GitLab service token? Scheduler and watcher stop working until a new one is saved."
-                         : "Remove your GitLab token?")) return;
-    try { await api((service ? "/api/token/service" : "/api/token") + "/delete", {}); await refresh();
-      service ? viewSettings() : viewProfile(); toast("Token removed"); } catch (e) { toast(e.message, true); }
+  async tokentest() { try { toast((await api("/api/token/test", {})).msg); } catch (e) { toast(e.message, true); } },
+  async tokendel() {
+    if (!confirm("Remove your GitLab token? You cannot use GitLab in Watchdock until you save a new one, "
+                 + "and automatic TYPO3 updates of projects you are responsible for stop.")) return;
+    try { await api("/api/token/delete", {}); await refresh(); viewProfile(); toast("Token removed"); } catch (e) { toast(e.message, true); }
   },
 };
 document.addEventListener("keydown", e => {
@@ -1607,7 +1587,7 @@ const cardTitled = t => () => [...document.querySelectorAll("#view .card h2")].f
 const TOUR = [
   {title: "Welcome to T3 Watchdock", text: "This tour shows the main parts in about a minute. Use the buttons or → / ←; Esc ends it. Restart it any time with the ⓘ button at the top."},
   {el: "header nav", title: "Navigation", text: "Projects, Activity (runs and log), Scheduler (automatic tasks), Settings and Plugins."},
-  {el: "#tokenPill", title: "Your GitLab token", text: "Shows ✓ when your own token is stored. Pipelines and jobs you start run as you in GitLab."},
+  {el: "#tokenPill", title: "Your GitLab token", text: "Shows ✓ when your own token is stored. Everything you do with GitLab here runs as you; without a token, GitLab features do not work."},
   {el: "#profileBtn", title: "Profile", text: "Name, email, password, your GitLab token and the appearance (theme and style)."},
   {route: "#/", el: ".grid .pcard", title: "Project card", text: "Monitoring per environment, the last CI/CD pipeline and its result. The picture at the bottom right is the responsible person. Click the card for details."},
   {route: "#/", el: "#view .seg", title: "Cards or table", text: "Switch between project cards and the TYPO3 status table."},
@@ -1618,8 +1598,8 @@ const TOUR = [
   {route: firstProject, el: "#view .pipe-env", title: "Pipelines", text: "Start a pipeline per environment with ▶. The current pipeline and its jobs appear here; production can be promoted after a successful staging pipeline."},
   {route: firstProject, el: '#view .head a[href$="/edit"]', title: "Edit project", text: "Branches, variables, auto-play jobs, TYPO3 auto-update, monitoring, and the responsible person shown on the card."},
   {route: "#/activity", el: "#view .card", title: "Activity", text: "All pipeline runs started from Watchdock and the activity log."},
-  {route: "#/scheduler", el: "#view .card", title: "Scheduler", text: "Automatic tasks such as the TYPO3 release check: interval or daily time, or run now. They use the GitLab service token."},
-  {route: "#/settings", el: cardTitled("GitLab service token"), title: "Settings", text: "Admins store the GitLab service token for background work here. Below: Teams and email notifications, project export / import."},
+  {route: "#/scheduler", el: "#view .card", title: "Scheduler", text: "Automatic tasks such as the TYPO3 release check: interval or daily time, or run now. Automatic TYPO3 update pipelines run with the token of each project's responsible person."},
+  {route: "#/settings", el: cardTitled("Microsoft Teams"), title: "Settings", text: "Teams and email notifications, project export / import and the TYPO3 release check."},
   {route: "#/profile", el: cardWith("#gtform"), title: "Your GitLab token", text: "Save your personal access token (scope api) here. It is stored encrypted and never shown again."},
   {route: "#/profile", el: cardWith("#apform"), title: "Appearance", text: "Theme and style, saved in this browser."},
   {route: "#/", title: "That's it", text: "Restart the tour any time with the ⓘ button at the top."},

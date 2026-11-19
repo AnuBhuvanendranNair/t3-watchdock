@@ -1,4 +1,5 @@
-"""GitLab API: tokens (per user + service token, encrypted), pipelines, manual jobs, project lookup."""
+"""GitLab API: tokens (one per user, encrypted), pipelines, manual jobs, project lookup."""
+import contextlib
 import contextvars
 import json
 import re
@@ -15,16 +16,25 @@ from .db import last_pipelines, run_add
 
 
 # ---------------------------------------------------------------- GitLab tokens
-# Browser requests use the token of the signed-in user, so GitLab shows who started a pipeline or job.
-# Reads (GET) fall back to the service token when the user has none; writes (pipelines, jobs) never do.
-# Background work (scheduler, TYPO3 watcher, mail watches) runs without a user and uses the service token.
-SERVICE = "gitlab_service_token"
+# Only signed-in people use GitLab: every call runs with the token of one user, never with a shared token.
+# Browser requests: the signed-in user. Background work (TYPO3 auto-update, its mail watch and auto-play):
+# the responsible person of the project, set with as_user(). No user or no token -> the call is refused.
 _user = contextvars.ContextVar("gitlab_user", default=None)
 
 
 def set_user(name):
     """Called for every browser request (None for requests without a session)."""
     _user.set(name)
+
+
+@contextlib.contextmanager
+def as_user(name):
+    """GitLab calls inside this block (and threads started from it with a copied context) use name's token."""
+    t = _user.set(name)
+    try:
+        yield
+    finally:
+        _user.reset(t)
 
 
 def _clean(value):
@@ -35,72 +45,41 @@ def _clean(value):
 
 
 def token_status(user):
-    return {"own": bool(user and db.user_token(user)), "service": db.secret_get(SERVICE) is not None}
+    return {"own": bool(user and db.user_token(user))}
 
 
-def token(write=False):
+def token():
     user = _user.get()
-    if user:
-        own = db.user_token(user)
-        if own:
-            return crypto.decrypt(own)
-        if write:
-            raise RuntimeError("No personal GitLab token stored. Add yours under Profile → GitLab token.")
-    svc = db.secret_get(SERVICE)
-    if svc:
-        return crypto.decrypt(svc)
-    raise RuntimeError("No GitLab token stored. Add your own under Profile → GitLab token"
-                       + ("." if user else "; an admin adds the service token in Settings."))
+    if not user:
+        raise RuntimeError("GitLab call without a user: only signed-in people (or a project's responsible person "
+                           "for automatic runs) may use GitLab")
+    return stored_token(user)
 
 
 def save_token(user, value):
-    """user: own token of that user; None: service token."""
-    enc = crypto.encrypt(_clean(value))
+    db.user_token_set(user, crypto.encrypt(_clean(value)))
     _avatars.pop(user, None)
-    if user:
-        db.user_token_set(user, enc)
-        log(f"Personal GitLab token saved: {user}")
-    else:
-        db.secret_set(SERVICE, enc)
-        log("GitLab service token saved")
+    log(f"Personal GitLab token saved: {user}")
 
 
 def delete_token(user):
+    db.user_token_set(user, None)
     _avatars.pop(user, None)
-    if user:
-        db.user_token_set(user, None)
-        log(f"Personal GitLab token removed: {user}")
-    else:
-        db.secret_set(SERVICE, None)
-        log("GitLab service token removed")
+    log(f"Personal GitLab token removed: {user}")
 
 
 def stored_token(user):
-    """Decrypted own token (user) or service token (None); raises if none is stored."""
-    enc = db.user_token(user) if user else db.secret_get(SERVICE)
+    enc = db.user_token(user)
     if not enc:
-        raise RuntimeError("No personal GitLab token stored" if user else "No GitLab service token stored")
+        raise RuntimeError(f"No personal GitLab token stored for {user}. Add it under Profile → GitLab token.")
     return crypto.decrypt(enc)
 
 
-def import_token_files():
-    """One-time move of the former plaintext token files into the encrypted service token.
-
-    The app-folder file is deleted once its value is stored encrypted; ~/.gitlab-token belongs to the user
-    and is left in place (only read when no service token exists yet)."""
+def legacy_token_files():
+    """Former shared plaintext token files: no longer read. Logged so they can be deleted."""
     for f in (TOKEN_FILE, TOKEN_FALLBACK):
-        try:
-            value = f.read_text(encoding="utf-8").strip()
-        except FileNotFoundError:
-            continue
-        if not value:
-            continue
-        if db.secret_get(SERVICE) is None:
-            save_token(None, value)
-            log(f"GitLab token from {f} imported as the encrypted service token")
-        if f == TOKEN_FILE and stored_token(None) == value:
-            f.unlink()
-            log(f"Plaintext token file removed: {f}")
+        if f.exists():
+            log(f"{f} is no longer used (every user has an own token in Profile); delete it")
 
 
 def _main_host():
@@ -114,7 +93,7 @@ _avatars = {}                                   # user -> (fetched at, {"url", "
 
 
 def own_avatar(user):
-    """Avatar URL of the user's own GitLab account (own token only, never the service token's account)."""
+    """Avatar URL of the user's own GitLab account (read with that user's own token)."""
     hit = _avatars.get(user)
     if hit and time.time() - hit[0] < AVATAR_TTL:
         return hit[1]
@@ -132,7 +111,7 @@ def own_avatar(user):
 
 
 def test_token(user):
-    """Check the own (user) or service (None) token against GitLab of the first project (or gitlab.gingco.de)."""
+    """Check the user's own token against GitLab of the first project (or gitlab.gingco.de)."""
     url = _main_host()
     req = urllib.request.Request(url + "/api/v4/user", headers={"PRIVATE-TOKEN": stored_token(user)})
     try:
@@ -149,7 +128,7 @@ def gitlab(project, method, path, body=None):
            + urllib.parse.quote(project["path"], safe="") + path)
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
-        "PRIVATE-TOKEN": token(write=method != "GET"), "Content-Type": "application/json"})
+        "PRIVATE-TOKEN": token(), "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             raw = r.read()

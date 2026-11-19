@@ -21,8 +21,8 @@ Python web app ([Flask](https://flask.palletsprojects.com), served by [Gunicorn]
 
 ## Features
 
-- **Login** — named user accounts, managed on the command line (`bin/t3-watchdock add-user NAME`); every page and API call needs a session; admins are set with `set-admin NAME on` (see *Login*)
-- **GitLab token per user** — everyone saves their own token in *Profile*, so GitLab shows who started a pipeline; a service token (admin only) covers scheduler and watcher; all tokens stored encrypted (see *GitLab tokens*)
+- **Login** — named user accounts, managed on the command line (`bin/t3-watchdock add-user NAME`); every page and API call needs a session (see *Login*)
+- **GitLab token per user** — only signed-in people use GitLab: everyone saves their own token in *Profile*, so GitLab shows who did what; automatic TYPO3 updates run with the token of the project's responsible person; no shared token; all tokens stored encrypted (see *GitLab tokens*)
 - **Project list** — GitLab projects (path + branch) managed in the UI, stored in the SQLite database `watchdock.db`
 - **Project form pre-fill** — new projects start with defaults (staging/production, `build:main`, TYPO3 13, `TARGET_TASK_NAME=shup01`); branch, production branch and TYPO3 major are select boxes; when GitLab is reachable, project path search plus name, branches, manual jobs (CI lint) and TYPO3 major are read from GitLab
 - **Export / import projects** — *Settings → Export / import projects* writes all projects including their t3monitor keys and Basic auth passwords to one JSON file and reads such a file again (existing projects are skipped unless *Overwrite* is ticked). The GitLab token, Teams webhook URL and SMTP password are never exported
@@ -51,7 +51,7 @@ Python web app ([Flask](https://flask.palletsprojects.com), served by [Gunicorn]
 - **Dark / light theme** — *Profile → Appearance → Theme*: *Auto* (follows the system setting), *Light* or *Dark*; the choice is saved in the browser (`localStorage`) and applied before the page is drawn
 - **Focus style** — choose *Focus* in *Profile → Appearance → Style* for a quieter look with less repeated copy (its projects page layout is now the layout of every style). It follows the Auto, Light, or Dark setting and is saved per browser.
 - **Guided tour** — the ⓘ button in the header starts an 18-step tour across Projects, a project, Activity, Scheduler, Settings and Profile (spotlight + popup, → / ← / Esc, progress bar). Starts once by itself on the first visit per browser; an unfinished tour resumes after a reload. Steps whose element is missing (e.g. no projects) are skipped
-- **Responsible person** — *Edit project → Basics → Responsible person* (a Watchdock user); the project card shows their GitLab picture (read with their own token; initials without one)
+- **Responsible person** — *Edit project → Basics → Responsible person* (a Watchdock user); the project card shows their GitLab picture (read with their own token; initials without one). Automatic TYPO3 update pipelines of the project run with this person's GitLab token
 - **Profile picture** — the Profile page shows your GitLab picture when your own token is stored
 - **Terminal style** — monospace font everywhere (system SF Mono/Menlo, no web fonts), square corners, outlined buttons, `$ ~/t3 watchdock` prompt with blinking cursor, `#`/`##` heading prefixes and `./` nav links; project cards of equal height with the CI/CD line at the bottom, environments as `PRD` / `STG`, a waiting manual job as an info icon with the message in a tooltip (hover, focus or click); *Dark* = phosphor green on black, *Light* = paper terminal; saved per browser
 - **Turbo C++ style** — classic DOS IDE look in the 16-colour CGA palette — grey menu bar with red hotkey letters and green selection, windows with double borders and centered titles, green buttons with shadow, cyan input fields; *Dark* = blue editor screen, *Light* = grey dialog look
@@ -82,7 +82,7 @@ bin/t3-watchdock add-user NAME                                # asks for the pas
 docker compose exec launcher bin/t3-watchdock add-user NAME   # same in Docker
 ```
 
-Open <http://127.0.0.1:8787>, sign in, save your GitLab token in *Profile → GitLab token*, add projects. For the scheduler and TYPO3 watcher, an admin (`bin/t3-watchdock set-admin NAME on`) saves a service token in *Settings → GitLab service token*.
+Open <http://127.0.0.1:8787>, sign in, save your GitLab token in *Profile → GitLab token*, add projects. For automatic TYPO3 updates, set a responsible person per project (*Edit project → Basics*).
 
 Without Docker (runs only while the terminal is open):
 
@@ -112,8 +112,7 @@ bin/t3-watchdock add-user NAME        # new account, asks for the password twice
 bin/t3-watchdock set-password NAME    # new password, signs the user out everywhere
 bin/t3-watchdock remove-user NAME     # delete account and its sessions
 bin/t3-watchdock unlock-user NAME     # unlock after 3 failed logins
-bin/t3-watchdock list-users           # names, creation dates, admins, own GitLab token, locked accounts
-bin/t3-watchdock set-admin NAME on    # admins manage the GitLab service token (off: set-admin NAME off)
+bin/t3-watchdock list-users           # names, creation dates, own GitLab token, locked accounts
 bin/t3-watchdock gen-secret-key       # print a new key for WATCHDOCK_SECRET_KEY
 ```
 
@@ -125,9 +124,8 @@ bin/t3-watchdock gen-secret-key       # print a new key for WATCHDOCK_SECRET_KEY
 - **Failed logins per address:** 5 failures per client address (any name) within 15 minutes block that address for the rest of the window (in memory, reset on restart). Behind a reverse proxy all requests come from the proxy address, so the limit then applies to everyone together.
 - **Profile** (user icon in the header, `#/profile`): your GitLab picture (with your own token stored), full name and email (optional, stored with the account; login name read-only), *Appearance* (theme and style, saved per browser), your own GitLab token (see *GitLab tokens*), and change your own password in the browser. Needs the current password; your other sessions are signed out, the current one stays. A wrong current password counts as a failed login (3 lock the account).
 - A locked account is also signed out everywhere.
-- **Admins:** `set-admin NAME on|off` on the command line. Only admins can save, test or remove the GitLab service token (*Settings*); everything else is the same for all users. New and existing accounts start without admin rights.
 - Logins and logouts are written to the log (*Activity*) with the user name.
-- **After updating** an existing instance: the database gets the `users` and `sessions` tables automatically on start, but no account. Run `add-user` once, otherwise nobody can sign in (also not the Patchday browser extension, which uses the signed-in Watchdock tab). Since the per-user GitLab tokens (schema version 6): create the secret key first (see *Quick start*), make at least one user admin with `set-admin NAME on`, and let every user save their own token in *Profile*.
+- **After updating** an existing instance: the database gets the `users` and `sessions` tables automatically on start, but no account. Run `add-user` once, otherwise nobody can sign in (also not the Patchday browser extension, which uses the signed-in Watchdock tab). Since the per-user GitLab tokens (schema version 6): create the secret key first (see *Quick start*), let every user save their own token in *Profile*, and set a responsible person on every project with TYPO3 auto-update. Schema version 7 removes the shared service token and the admin flag again.
 
 ## Configuration
 
@@ -245,11 +243,11 @@ In the project form, the production branch is pre-filled from GitLab (`productio
 
 ## GitLab tokens
 
-- **Personal token** — every user saves their own in *Profile → GitLab token*. Pipelines and jobs started in the browser (run, promote, production, play, auto-play of manual jobs) use it, so GitLab shows who started what. Without one, these actions are refused; read-only views fall back to the service token.
-- **Service token** — one for the app, saved by an admin in *Settings → GitLab service token*. Used when no user is signed in: scheduler, TYPO3 watcher, pipeline mail watches. Prefer a project or group access token limited to the needed projects, with an expiry date (`api` scope is needed to play manual jobs).
-- Both are stored encrypted (Fernet, package `cryptography`) in `watchdock.db`, read server-side only, never sent to the browser or exported. They can be tested and removed in the UI.
+- **Personal token** — every user saves their own in *Profile → GitLab token*. Pipelines and jobs started in the browser (run, promote, production, play, auto-play of manual jobs) use it, so GitLab shows who started what. Without one, nothing that talks to GitLab works for that user (also read-only views such as pipeline status).
+- **Automatic runs** — there is no shared token. The TYPO3 auto-update starts each project's pipeline (and plays its manual jobs and watches it for the result mail) with the token of the project's **responsible person**. No responsible person, or no token stored for them → the pipeline is not started, the reason is logged and sent via Teams / email, and it is retried on the next check. The other scheduled tasks (t3monitor, PHP / security, TYPO3 announcements) do not use GitLab.
+- Tokens are stored encrypted (Fernet, package `cryptography`) in `watchdock.db`, read server-side only, never sent to the browser or exported. They can be tested and removed in the UI.
 - **Key** — kept outside the data folder, so a copy of the database alone does not reveal the tokens. First match wins: `WATCHDOCK_SECRET_KEY` (the key), `WATCHDOCK_SECRET_KEY_FILE` (path to it; Docker uses this with the secret `~/.t3-watchdock-secret-key` from the host, see `compose.yaml`), else `~/.t3-watchdock-secret-key` (created on first local start, mode `600`). A lost or changed key makes the stored tokens unreadable: save them again. Back up the key separately from the database.
-- **Upgrade** — on first start, an existing `.gitlab-token` in the app folder is imported as the encrypted service token and the plaintext file is deleted. `~/.gitlab-token` is imported if no service token exists yet, but left in place (delete it yourself).
+- **Upgrade** — a former shared `.gitlab-token` (app folder or `~/.gitlab-token`) is no longer read; on start the log names it so it can be deleted.
 - **Docker upgrade** — create `~/.t3-watchdock-secret-key` first (command in *Quick start*) — the container reads it as a Docker secret.
 
 ## Run with Docker (always on)
@@ -373,7 +371,7 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 - Optional HTTPS with a local mkcert certificate
 - `Host` header check against DNS rebinding
 - `Origin` check and `application/json` requirement on POST against cross-site requests
-- GitLab tokens are stored encrypted in the database, the key outside the data folder (see *GitLab tokens*). Pipelines and jobs started in the browser use the signed-in user's own token; only admins can change the service token; a user's GitLab picture is read with that user's own token only. Other secrets (Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form; the project export file contains t3monitor keys and Basic auth passwords in plain text. Both work only on a same-origin HTTPS or localhost request
+- GitLab tokens are stored encrypted in the database, the key outside the data folder (see *GitLab tokens*). Every GitLab call uses one person's own token: the signed-in user, or the responsible person for automatic TYPO3 updates; there is no shared token; a user's GitLab picture is read with that user's own token only. Other secrets (Teams webhook URL, SMTP password, t3monitor keys and Basic auth passwords) are stored in separate files with mode `600`. Only t3monitor keys can be revealed from the project edit form; the project export file contains t3monitor keys and Basic auth passwords in plain text. Both work only on a same-origin HTTPS or localhost request
 - Token, secrets, config, state, t3monitor history and logs are gitignored
 - Outgoing connections: GitLab (only to the GitLab URLs of configured projects), `get.typo3.org`, `news.typo3.com` (security feed), the Teams webhook / SMTP server if enabled, the t3monitor site URLs, `repo.packagist.org` (only public Composer package names are sent), and — when a changelog is opened — `api.github.com`, `raw.githubusercontent.com` or `gitlab.com` (public repository paths and tags only)
 
@@ -387,7 +385,7 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 | `watchdock/core.py` | Paths, settings, shared state, JSON storage |
 | `watchdock/db.py` | SQLite storage: projects, settings, runs, log, scheduler results, TYPO3 baselines, pending notifications, users, sessions |
 | `watchdock/alerts.py` | E-mail and Microsoft Teams notifications |
-| `watchdock/gitlab.py` | GitLab API: tokens (per user + service token), pipelines, manual jobs, project lookup |
+| `watchdock/gitlab.py` | GitLab API: tokens (one per user), pipelines, manual jobs, project lookup |
 | `watchdock/crypto.py` | Encryption of the stored GitLab tokens (key outside the data folder) |
 | `watchdock/extensions.py` | Extension update check (Packagist) and changelogs |
 | `watchdock/t3monitor.py` | t3monitor client, history, change detection |
@@ -404,7 +402,7 @@ Switched off (or missing) plugins answer `404` and load nothing. Settings are re
 | `Dockerfile`, `compose.yaml` | Docker setup (app + Traefik proxy) |
 | `traefik/dynamic.yml` | Traefik routes, middlewares (limits, headers) and TLS certificate |
 | `certs/` | mkcert certificate + key (gitignored) |
-| `watchdock.db` | SQLite database (stdlib `sqlite3`, mode `600`): projects, settings, runs, log, TYPO3 baselines, scheduler results, pending notifications, user accounts (password hashes, admin flag, encrypted GitLab tokens), encrypted service token and sessions (gitignored). On first start an existing `config.json` / `state.json` is imported and renamed to `<name>.imported-<time>` (backup) |
+| `watchdock.db` | SQLite database (stdlib `sqlite3`, mode `600`): projects, settings, runs, log, TYPO3 baselines, scheduler results, pending notifications, user accounts (password hashes, encrypted GitLab tokens) and sessions (gitignored). On first start an existing `config.json` / `state.json` is imported and renamed to `<name>.imported-<time>` (backup) |
 | `.gitlab-token` | Legacy plaintext GitLab token: imported encrypted on start, then deleted (gitignored) |
 | `.smtp-password` | SMTP password (gitignored) |
 | `.teams-webhook` | Teams webhook URL (gitignored) |

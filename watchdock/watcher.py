@@ -8,8 +8,8 @@ import urllib.request
 from .core import FINAL_STATUSES, MAIL_WATCH_POLL, MAIL_WATCH_TIMEOUT, TYPO3_API, config, log, notify, now, stop_event
 from .alerts import notify_event
 from .db import (kv_set, mail_watch_add, mail_watch_done, mail_watches, typo3_announce, typo3_latest_merge,
-                 typo3_seen, typo3_seen_set)
-from .gitlab import find_project, gitlab, run_pipeline
+                 typo3_seen, typo3_seen_set, user_token)
+from .gitlab import as_user, find_project, gitlab, run_pipeline
 
 
 def _mail_watch_done(pipeline_id):
@@ -26,7 +26,8 @@ def watch_pipeline_mail(w):
         except RuntimeError:                       # project removed meanwhile
             return _mail_watch_done(w["pipeline"])
         try:
-            pl = gitlab(project, "GET", f"/pipelines/{w['pipeline']}")
+            with as_user(w.get("user")):           # the responsible person whose token started the pipeline
+                pl = gitlab(project, "GET", f"/pipelines/{w['pipeline']}")
             if pl["status"] in FINAL_STATUSES:
                 break
         except Exception as e:
@@ -53,9 +54,9 @@ def watch_pipeline_mail(w):
     _mail_watch_done(w["pipeline"])
 
 
-def start_mail_watch(project, pl, trigger):
+def start_mail_watch(project, pl, trigger, user):
     w = {"project": project["id"], "pipeline": pl["id"], "web_url": pl.get("web_url"),
-         "trigger": trigger, "t": now()}
+         "trigger": trigger, "t": now(), "user": user}
     mail_watch_add(w)
     threading.Thread(target=watch_pipeline_mail, args=(w,), daemon=True).start()
 
@@ -111,15 +112,31 @@ def check_typo3():
         elif prev != v:
             due.append((p, prev, v))
 
-    announce_update(due)
-    for p, prev, v in due:
+    # Automatic runs use the token of the project's responsible person (no shared token exists).
+    ready, missing = [], []
+    for d in due:
+        owner = d[0].get("owner")
+        (ready if owner and user_token(owner) else missing).append(d)
+    for p, prev, v in missing:
+        # Not marked as seen -> retried on the next check once a responsible person with a token is set.
+        why = "no responsible person set" if not p.get("owner") else f"{p['owner']} has no GitLab token stored"
+        log(f"Auto-trigger skipped for {p['id']} (TYPO3 {v}): {why}")
+        errors.append(f"Auto-trigger skipped for {p['name']} (TYPO3 {v}): {why}")
+        notify_event(f"TYPO3 update {p['name']}: NOT STARTED",
+                     "The automatic TYPO3 update runs with the GitLab token of the project's responsible person. "
+                     "Set one in the project form (and let them save their token in Profile); it is retried on the next check.",
+                     [("Project", f"{p['name']} ({p['path']})"), ("Branch", p["ref"]),
+                      ("Trigger", f"TYPO3 {prev} -> {v}"), ("Reason", why)])
+    announce_update(ready)
+    for p, prev, v in ready:
         trigger = f"TYPO3 {prev} -> {v}"
         try:
-            pl = run_pipeline(p, p["auto_typo3"].get("variables", {}), trigger,
-                              p["auto_typo3"].get("auto_play", []))
+            with as_user(p["owner"]):
+                pl = run_pipeline(p, p["auto_typo3"].get("variables", {}), trigger,
+                                  p["auto_typo3"].get("auto_play", []))
             typo3_seen_set(p["id"], v)
             notify("TYPO3 update started", f"{p['name']}: {v} (pipeline #{pl['id']})")
-            start_mail_watch(p, pl, trigger)
+            start_mail_watch(p, pl, trigger, p["owner"])
         except Exception as e:
             # Not marked as seen -> retried on next check.
             log(f"Auto-trigger failed for {p['id']} (TYPO3 {v}): {e}")
