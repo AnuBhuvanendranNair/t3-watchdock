@@ -246,7 +246,7 @@ def t3m_fetch(project, env="production", alert=True):
             hf.parent.mkdir(parents=True, exist_ok=True)
             save(hf, h)
         if first_fail and alert:                          # once per new error text, not on every run
-            notify_event(f"t3monitor check FAILED: {site}", "The TYPO3 status of this site could not be read.",
+            notify_event(f"TYPO3 health check FAILED: {site}", "The TYPO3 status of this site could not be read.",
                          [("Site", url or "–"), ("Error", msg)], t3m_launcher_link(pid), "Open in launcher")
         raise RuntimeError(msg) from None
     with lock:
