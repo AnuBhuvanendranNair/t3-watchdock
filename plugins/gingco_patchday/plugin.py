@@ -17,7 +17,7 @@ from watchdock.gitlab import find_project
 from watchdock.plugins import enabled
 from watchdock.t3monitor import t3m_cfg, t3m_fetch, t3m_history_file, t3m_view
 
-SERVER = {"php": "PHP", "db": "Database", "webserver": "Web server"}   # server changes listed next to the updates
+SERVER = {"php": "PHP", "db": "MySQL", "webserver": "nginx"}   # server changes listed next to the updates (t3monitor field: label)
 
 
 def domain(p):
@@ -62,13 +62,19 @@ def data(q):
 
 
 def server_changes(pid):
-    """PHP, database and web server version changes between consecutive production snapshots:
+    """PHP, MySQL (t3monitor "MysqlVersion", also MariaDB) and nginx version changes between consecutive production snapshots:
     [(time, {"key": "php", "name": "PHP", "o": "8.3.36", "n": "8.3.37", "server": True}), ...]."""
     snaps = load(t3m_history_file(pid, "production"), {"snapshots": []}).get("snapshots") or []
     out = []
     for cur, prev in zip(snaps, snaps[1:]):
         for k, name in SERVER.items():
             o, n = prev["data"].get(k), cur["data"].get(k)
+            if k == "webserver":                            # nginx only (Apache etc. are left out), without "nginx/"
+                if not all(str(x or "").lower().startswith("nginx/") for x in (o, n)):
+                    continue
+                o, n = str(o)[6:], str(n)[6:]
+            elif k == "db":                                 # "MySQL 11.6.2-MariaDB" -> "11.6.2-MariaDB" (label says MySQL)
+                o, n = (re.sub(r"^mysql\s+", "", str(x), flags=re.I) for x in (o, n))
             if o and n and re.findall(r"\d+(?:\.\d+)+", str(o)) != re.findall(r"\d+(?:\.\d+)+", str(n)):  # skip format-only changes
                 out.append((cur["t"], {"key": k, "name": name, "o": str(o), "n": str(n), "server": True}))
     return out

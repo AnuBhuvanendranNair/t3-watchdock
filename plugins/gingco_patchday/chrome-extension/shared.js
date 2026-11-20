@@ -178,7 +178,7 @@ async function writeOP(data, cfg, o = {}) {
   const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const line = i => {
     const core = i.key === 'typo3';
-    if (i.server) return i.name + ': ' + i.o + (legacy ? ' -> ' : ' to ') + i.n;   // PHP, Database, Web server
+    if (i.server) return i.name + ': ' + i.o + (legacy ? ' -> ' : ' to ') + i.n;   // PHP, MySQL, nginx
     if (legacy) {
       const k = core ? 'TYPO3 Core' : i.key;
       if (dash(i.o)) return k + ': neu installiert (' + i.n + ')';
