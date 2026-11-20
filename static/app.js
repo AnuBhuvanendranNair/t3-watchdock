@@ -1426,12 +1426,23 @@ async function viewVersions(rep) {
       <td class="sub">${esc(s.env_label)}</td>
       ${s.cells.map((x, i) => `<td><div class="vr-cell">${vrIc(x.tone)}<div><b>${esc(x.version)}</b>
         <div class="sub">${i > 1 && x.kind ? esc(x.kind) + " · " : ""}${esc(x.label)}</div></div></div></td>`).join("")}</tr>`; }).join("");
-  prev = null;
-  const advs = rep.advisories.filter(a => vrFilter !== "bad" || a.tone === "bad").map(a => { const k = a.project + a.env, first = k !== prev; prev = k;
-    return `<tr class="${first ? "vr-first" : ""}"><td>${first ? esc(a.name) : ""}</td><td class="sub">${first ? esc(a.env_label) : ""}</td>
-      <td>${/^https?:\/\//.test(a.link || "") ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ${ic("ext", "sm")}</a>` : esc(a.title)}
-        <div class="sub">${esc(a.sub)}</div></td>
-      <td><div class="vr-cell">${vrIc(a.tone)}<span>${esc(a.severity)}</span></div></td></tr>`; }).join("");
+  // advisories: one collapsible row per site and environment, summary = count per severity
+  const SEV_ORDER = ["Critical", "High", "Important", "Medium", "Moderate", "Not rated", "Low"];
+  const groups = new Map();
+  rep.advisories.filter(a => vrFilter !== "bad" || a.tone === "bad").forEach(a => {
+    const k = a.project + "|" + a.env;
+    if (!groups.has(k)) groups.set(k, {a, items: []});
+    groups.get(k).items.push(a);
+  });
+  const advs = [...groups.values()].map(({a, items}) => {
+    const by = {}; items.forEach(x => (by[x.severity] ||= {n: 0, tone: x.tone}).n++);
+    const sev = Object.keys(by).sort((x, y) => (SEV_ORDER.indexOf(x) + 99) % 99 - (SEV_ORDER.indexOf(y) + 99) % 99);
+    const worst = items.some(x => x.tone === "bad") ? "bad" : items.some(x => x.tone === "warn") ? "warn" : "muted";
+    return `<details class="vr-adv"><summary>${vrIc(worst)}<span class="vr-adv-site"><b>${esc(a.name)}</b> <span class="sub">${esc(a.env_label)}</span></span>
+        <span class="vr-adv-sum">${sev.map(k => `<span class="vr-chip vr-${by[k].tone}">${by[k].n} ${esc(k.toLowerCase())}</span>`).join("")}</span>${ic("chev", "vr-chev")}</summary>
+      <ul>${items.map(x => `<li>${vrIc(x.tone)}<div>${/^https?:\/\//.test(x.link || "") ? `<a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}
+        <div class="sub">${esc(x.severity)} · ${esc(x.sub)}</div></div></li>`).join("")}</ul></details>`;
+  }).join("");
   v.innerHTML = `<div class="sched vr">
     <div class="sched-head vr-head"><div><h1>Versions</h1>
       <p>TYPO3, PHP, database and web server of every site compared with the newest releases · updated ${esc(relTime(rep.generated))} · daily email in <a href="#/scheduler">Scheduler</a></p></div>
@@ -1446,10 +1457,9 @@ async function viewVersions(rep) {
         .map(([k, l]) => `<option value="${k}" ${vrFilter === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     <div class="wrap"><table class="typo3-overview vr-table"><thead><tr><th>Site</th><th>Environment</th>${rep.cols.map(x => `<th>${esc(x)}</th>`).join("")}</tr></thead>
       <tbody>${rows || `<tr><td colspan="6" class="empty">Nothing to show for this filter.</td></tr>`}</tbody></table></div>
-    <h2 class="vr-h2">Security advisories <span class="sub">${rep.advisories.length}</span></h2>
-    <p class="sub vr-note">TYPO3 core and public extensions (Packagist) and Apache httpd CVEs (httpd.apache.org) for the installed version.</p>
-    ${advs ? `<div class="wrap"><table class="typo3-overview vr-table"><thead><tr><th>Site</th><th>Environment</th><th>Advisory</th><th>Severity</th></tr></thead><tbody>${advs}</tbody></table></div>`
-      : `<p class="empty">No known security advisories.</p>`}
+    <h2 class="vr-h2">Security advisories <span class="sub">${rep.advisories.length} on ${groups.size} ${groups.size === 1 ? "instance" : "instances"}</span></h2>
+    <p class="sub vr-note">TYPO3 core and public extensions (Packagist) and Apache httpd CVEs (httpd.apache.org) for the installed version. Click a site for the list.</p>
+    ${advs ? `<div class="vr-advs">${advs}</div>` : `<p class="empty">No known security advisories.</p>`}
     <h2 class="vr-h2">Newest releases</h2>
     <div class="vr-newest">${rep.newest.map(([k, x]) => `<div><span class="sub">${esc(k)}</span><b>${esc(x)}</b></div>`).join("")}</div>
   </div>`;
