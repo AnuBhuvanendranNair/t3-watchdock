@@ -11,6 +11,7 @@ from .alerts import notify_event
 from .security import (_passed, advisories, nginx_latest, nginx_status, php_cycles, php_status, site_advisories,
                        site_packages, typo3_security_feed)
 from .extensions import _vparse
+from .versions import ICONS, db_state, nginx_state, php_state, release_data, typo3_state
 from .t3monitor import T3M_ENVS, _n, _upd_text, t3m_cfg, t3m_fetch, t3m_history_file, t3m_key
 from .watcher import check_typo3
 from .updates import send_update_commands
@@ -136,6 +137,7 @@ def task_t3monitor():
 
 
 ADV_TONE = {"critical": "bad", "high": "bad", "medium": "warn", "low": "muted"}
+ADV_RANK = {"critical": 0, "high": 1, "medium": 3, "low": 4}
 SEV_RANK = {"Critical": 0, "High": 1, "End of life": 1, "Unsupported": 1, "Security update": 2, "Medium": 3,
             "Not rated": 4, "Update": 5, "Low": 6}
 
@@ -271,6 +273,59 @@ def task_releases():
     return " · ".join(f"{k.replace(':', ' ')} {v}" for k, v in cur.items()) + (f" · {len(new)} new" if new else "")
 
 
+def task_daily_report():
+    """Daily version report: TYPO3, PHP, database and nginx of every site against the newest releases, plus the
+    known security advisories. Sent on every run, also when everything is current."""
+    sites = _monitored_sites()
+    if not sites:
+        return "No t3monitor data yet (run the TYPO3 health check first)"
+    rel = release_data()
+    order = {p["id"]: i for i, p in enumerate(config()["projects"])}
+    envs = list(T3M_ENVS)
+    rows, adv_rows, count = [], [], {t: 0 for t in ICONS}
+    cell = lambda x: {"text": x["version"], "sub": x["label"], "icon": x["tone"]}
+    for p, env, d in sorted(sites, key=lambda x: (order.get(x[0]["id"], 999), envs.index(x[1]))):
+        label = T3M_ENVS[env]["label"]
+        adv = (load(t3m_history_file(p["id"], env), {"snapshots": []}).get("security") or {}).get("advisories") or []
+        db, kind = db_state(d.get("db"), rel)
+        st = [typo3_state(d.get("typo3"), adv, rel), php_state(d.get("php"), rel), db, nginx_state(d.get("webserver"), rel)]
+        for x in st:
+            count[x["tone"]] += 1
+        rows.append([p["name"], label, cell(st[0]), cell(st[1]),
+                     {**cell(db), "sub": f"{kind} · {db['label']}"}, cell(st[3])])
+        for a in adv:
+            r = (a.get("severity") or "").lower()
+            adv_rows.append((ADV_RANK.get(r, 2), [p["name"], label,
+                             {"text": a["title"], "sub": " · ".join(x for x in (f"{a['package']} {a['version']}", a.get("cve")) if x)},
+                             {"text": r.capitalize() or "Not rated", "icon": ADV_TONE.get(r, "warn")}]))
+    today = datetime.date.today().isoformat()
+    live = lambda cy: [c["latest"] for k, c in sorted(cy.items(), key=lambda kv: _vparse(kv[0]) or ((0,), 0), reverse=True)
+                       if c.get("latest") and not _passed(c.get("eol"), today)]
+    newest = [["TYPO3", " · ".join(v for _, v in sorted(rel["typo3_latest"].items(), reverse=True)) or "–"],
+              ["PHP", " · ".join(live(rel["php"])) or "–"],
+              ["MariaDB", " · ".join(live(rel["mariadb"])[:4]) or "–"],
+              ["MySQL", " · ".join(live(rel["mysql"])[:3]) or "–"],
+              ["nginx", " · ".join(f"{v} ({b})" for b, v in rel["nginx"].items()) or "–"]]
+    bad, warn = count["bad"], count["warn"]
+    headline = (f"All {_n(len(sites), 'site')} up to date" if not bad and not warn else
+                " · ".join(x for x in (bad and f"{bad} security / end of life", warn and _n(warn, "update")) if x))
+    notify_event(f"Daily version report: {bad} critical · {_n(warn, 'update')}",
+                 "TYPO3, PHP, database and nginx of every site compared with the newest releases.", [],
+                 app_url(), "Open T3 Watchdock", headline=headline,
+                 stats=[("Sites", len(sites), None), ("Security / end of life", bad, "bad" if bad else "muted"),
+                        ("Updates", warn, "warn" if warn else "muted"), ("Current", count["ok"], "ok" if count["ok"] else "muted")],
+                 sections=[
+                     {"title": "Sites", "legend": [(t, m) for t, (_, m) in ICONS.items()],
+                      "widths": ["15%", "11%", "19%", "18%", "19%", "18%"],
+                      "cols": ["Site", "Environment", "TYPO3", "PHP", "Database", "nginx"],
+                      "rows": _grouped(rows)},
+                     {"title": "Security advisories", "note": "Known advisories for TYPO3 core and the public extensions (Packagist).",
+                      "widths": ["16%", "10%", "", "12%"], "cols": ["Site", "Environment", "Advisory", "Severity"],
+                      "rows": _grouped([r for _, r in sorted(adv_rows, key=lambda x: x[0])])},
+                     {"title": "Newest releases", "rows": newest}])
+    return f"{_n(len(sites), 'site')} · {bad} critical · {_n(warn, 'update')} · {len(adv_rows)} advisories"
+
+
 def task_typo3_news():
     """TYPO3 security announcements (advisories and PSA). One message per run, only for items not seen before.
     The first run only stores what is there (no message for old announcements)."""
@@ -315,6 +370,11 @@ TASKS = {
                                 "dates (endoflife.date), nginx against the current mainline and stable release (nginx.org), "
                                 "and TYPO3 core and extensions against known security advisories (Packagist). "
                                 "Uses the data of the last TYPO3 health check; messages only for new findings."},
+    "daily_report": {"name": "Daily version report", "run": task_daily_report, "legacy": "daily_report_interval_hours",
+                     "defaults": {"mode": "daily", "time": "07:30"},
+                     "description": "Email with TYPO3, PHP, database (MySQL / MariaDB) and nginx of every site compared "
+                                    "with the newest releases, with a severity icon per version and the known security "
+                                    "advisories. Sent every run, also when everything is current."},
     "typo3_news": {"name": "TYPO3 security announcements", "run": task_typo3_news, "legacy": "typo3_news_interval_hours",
                    "defaults": {"hours": 3.0},
                    "description": "Reads the TYPO3 security feed (news.typo3.com): core and extension advisories and "

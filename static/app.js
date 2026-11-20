@@ -1381,7 +1381,7 @@ async function saveEmail(extra) {
 }
 
 // Scheduler: one row per task (status, on/off, run now); the chevron opens last result + schedule.
-const SCHED_ICONS = {typo3_release: "tag", t3monitor: "activity", security: "shield", typo3_news: "bell", releases: "tag"};
+const SCHED_ICONS = {typo3_release: "tag", t3monitor: "activity", security: "shield", typo3_news: "bell", releases: "tag", daily_report: "mail"};
 const schedOpen = new Set();
 function relTime(iso) {   // "today 12:06", "yesterday 16:22", "tomorrow 07:00", else "18 Nov 16:22"
   if (!iso) return "–";
