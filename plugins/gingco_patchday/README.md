@@ -1,4 +1,4 @@
-**Patchday Plugin – README - Gingco Communication - Version: 2.0 - 11 2026**
+**Patchday Plugin – README - Gingco Communication - Version: 2.1 - 11 2026**
 
 ---
 
@@ -66,6 +66,7 @@ The same folder works in Firefox 128+ (`manifest.json` lists the background scri
 ## Data
 
 - Source: the update history of the **production** instance (version changes between t3monitor snapshots; own vendors from `t3monitor_local_vendors` are left out).
+- Server changes are listed too: PHP, database and web server version (e.g. `PHP: 8.3.36 -> 8.3.37`, `Web server: nginx/1.31.8 -> nginx/1.31.9`); the row heading then names *Server* (e.g. *Update TYPO3 Core, Plugins & Server:*). The OS is left out.
 - Date = day on which T3 Watchdock noticed the change. Every run reads the site first, so updates made the same day get today's date.
 - History starts with the first t3monitor check of the project in T3 Watchdock. Older rows already in the protocol stay; the duplicate check skips them.
 - Site name in OpenProject = production domain (as T3Monitor used in 1.x), so protocol pages used with 1.x match without the warning "Diese Seite wurde bisher für … verwendet".
@@ -85,5 +86,6 @@ The extension calls these from inside the T3 Watchdock tab (same origin), so T3 
 
 | Version | Changes |
 |---|---|
+| 2.1 | Server changes (PHP, database, web server) in the protocol, heading names *Server* |
 | 2.0 | Data from T3 Watchdock instead of T3Monitor; mapping by production domain; optional *Patchday* button in T3 Watchdock; Firefox 128+; 1.x CSV mapping rows are taken over when their website is a domain |
 | 1.4 | Last stand-alone version (repository `patchday`) |

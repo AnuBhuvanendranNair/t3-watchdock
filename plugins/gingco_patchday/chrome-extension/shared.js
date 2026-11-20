@@ -100,7 +100,7 @@ async function writeOP(data, cfg, o = {}) {
       .replace(/&nbsp;/g, ' ').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&').toLowerCase().split('\n');
   };
   const has = (ls, i) => {
-    const k = new RegExp(B + rxE(String(i.key).toLowerCase()) + E);
+    const k = new RegExp(B + rxE(String(i.server ? i.name : i.key).toLowerCase()) + E);
     const v = dash(i.n) ? i.o : i.n;
     const vr = dash(v) ? null : new RegExp(B + 'v?' + rxE(String(v).toLowerCase()) + E);
     return ls.some(l => k.test(l) && (!vr || vr.test(l)));
@@ -178,6 +178,7 @@ async function writeOP(data, cfg, o = {}) {
   const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const line = i => {
     const core = i.key === 'typo3';
+    if (i.server) return i.name + ': ' + i.o + (legacy ? ' -> ' : ' to ') + i.n;   // PHP, Database, Web server
     if (legacy) {
       const k = core ? 'TYPO3 Core' : i.key;
       if (dash(i.o)) return k + ': neu installiert (' + i.n + ')';
@@ -186,8 +187,13 @@ async function writeOP(data, cfg, o = {}) {
     }
     return (core ? 'TYPO3' : i.name + ' (' + i.key + ')') + ' : ' + i.o + ' to ' + i.n;
   };
-  const headOf = (c, o) => c && o ? 'Update TYPO3 Core & Plugins:' : (c ? 'Update TYPO3 Core:' : 'Update Plugins:');
-  const head = g => legacy ? headOf(g.items.some(i => i.key === 'typo3'), g.items.some(i => i.key !== 'typo3')) : 'Update Extensions:';
+  // "Update TYPO3 Core:", "Update TYPO3 Core & Plugins:", "Update Plugins & Server:", "Update TYPO3 Core, Plugins & Server:"
+  const headOf = (c, o, sv) => {
+    const w = [c && 'TYPO3 Core', o && 'Plugins', sv && 'Server'].filter(Boolean);
+    return 'Update ' + (w.length > 1 ? w.slice(0, -1).join(', ') + ' & ' + w[w.length - 1] : w[0] || 'Plugins') + ':';
+  };
+  const kinds = g => [g.items.some(i => i.key === 'typo3'), g.items.some(i => i.key !== 'typo3' && !i.server), g.items.some(i => i.server)];
+  const head = g => legacy || kinds(g)[2] ? headOf(...kinds(g)) : 'Update Extensions:';
   const mk = g => {
     const tr = doc.createElement('tr');
     tr.innerHTML = '<td>' + fmtD(g.d) + ' ' + tOf(g) + '</td><td>' + (g.none ? '<p>' + NONE + '</p>' : '<p>' + head(g) + '</p><ul>' +
@@ -214,9 +220,9 @@ async function writeOP(data, cfg, o = {}) {
     for (const i of a.g.items) { const li = doc.createElement('li'); li.textContent = line(i); ul.appendChild(li); }
     const p = c.querySelector('p');
     if (p && p.textContent.trim() === NONE) p.textContent = head(a.g); // später doch Updates am selben Tag
-    else if (p && /^Update (TYPO3 Core & Plugins|TYPO3 Core|Plugins):$/.test(p.textContent.trim())) {
-      const t = p.textContent;
-      p.textContent = headOf(/Core/.test(t) || a.g.items.some(i => i.key === 'typo3'), /Plugins/.test(t) || a.g.items.some(i => i.key !== 'typo3'));
+    else if (p && /^Update ((TYPO3 Core|Plugins|Server)(, | & )?)+:$/.test(p.textContent.trim())) {
+      const t = p.textContent, [c, o, sv] = kinds(a.g);
+      p.textContent = headOf(/Core/.test(t) || c, /Plugins/.test(t) || o, /Server/.test(t) || sv);
     }
   }
   if (!confirm(S + 'Website: ' + data.site + '\nOpenProject: ' + location.pathname.replace(/\/edit$/, '') +

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Patchday",
-  "version": "2.0",
+  "version": "2.1",
   "description": "Überträgt die Update-Historie aus T3 Watchdock ins OpenProject Patchday Protokoll.",
   "permissions": [
     "scripting",
