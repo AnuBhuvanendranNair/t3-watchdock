@@ -191,10 +191,10 @@ def _html_cell(c, first_plain):
         st += f"font-family:{MONO};font-size:12px;"
     if first_plain:
         st += f"color:{MUTED};width:30%;"
-    body = e(c["text"]) or "&nbsp;"
+    body = e(c["text"]) or ("" if c.get("tag") else "&nbsp;")
     if c.get("tag"):
         tfg, tbg, _ = TONES[c.get("tag_tone", "warn")]
-        body += (f' <span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;'
+        body += (f'{" " if body else ""}<span style="display:inline-block;white-space:nowrap;margin-left:{6 if body else 0}px;padding:1px 6px;border-radius:4px;'
                  f'font-family:{FONT};font-size:11px;font-weight:600;color:{tfg};background:{tbg}">{e(c["tag"])}</span>')
     if c.get("sub"):
         body += f'<div style="margin-top:2px;font-size:12px;color:{MUTED}">{e(c["sub"])}</div>'
@@ -271,7 +271,7 @@ def _teams_section(sec):
         cols = []
         for c in cells:
             c = _cell(c)
-            items = [{"type": "TextBlock", "text": c["text"] + (f" ({c['tag']})" if c.get("tag") else "") or " ",
+            items = [{"type": "TextBlock", "text": (c["text"] + (f" ({c['tag']})" if c.get("tag") else "") if c["text"] else c.get("tag")) or " ",
                       "wrap": True, "size": "Small"}]
             if head:
                 items[0].update(weight="Bolder", isSubtle=True)
