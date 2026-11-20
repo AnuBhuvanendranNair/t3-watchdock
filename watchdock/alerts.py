@@ -155,9 +155,20 @@ def _cell(c):
     return {"text": str(c)}
 
 
+ICON_GLYPH = {"bad": "!", "warn": "↑", "ok": "✓", "muted": "–"}   # severity icon per tone (cell key "icon")
+
+
 def _plain(c):
     c = _cell(c)
-    return " – ".join(x for x in (c["text"], c.get("tag", ""), c.get("sub", "")) if x)
+    icon = f"[{ICON_GLYPH[c['icon']]}] " if c.get("icon") else ""
+    return icon + " – ".join(x for x in (c["text"], c.get("tag", ""), c.get("sub", "")) if x)
+
+
+def icon_html(tone):
+    """Round coloured severity icon with a white glyph (email safe: no images, no SVG)."""
+    return (f'<span style="display:inline-block;width:18px;height:18px;line-height:18px;border-radius:9px;'
+            f'background:{TONES[tone][0]};color:#ffffff;font-family:{FONT};font-size:12px;font-weight:700;'
+            f'text-align:center;vertical-align:middle;margin-right:6px">{ICON_GLYPH[tone]}</span>')
 
 
 def _mail_text(intro, facts, sections, link, code, stats=None):
@@ -171,6 +182,8 @@ def _mail_text(intro, facts, sections, link, code, stats=None):
         block = [sec["title"], "-" * len(sec["title"])] if sec.get("title") else []
         if sec.get("note"):
             block.append(sec["note"])
+        if sec.get("legend"):
+            block.append("   ".join(f"[{ICON_GLYPH[t]}] {m}" for t, m in sec["legend"]))
         block += ["  ".join(v.ljust(w) for v, w in zip(r, widths)).rstrip() for r in rows]
         parts.append("\n".join(block))
     if link:
@@ -192,6 +205,9 @@ def _html_cell(c, first_plain):
     if first_plain:
         st += f"color:{MUTED};width:30%;"
     body = e(c["text"]) or ("" if c.get("tag") else "&nbsp;")
+    if c.get("icon"):
+        body = icon_html(c["icon"]) + f'<span style="vertical-align:middle">{body}</span>'
+
     if c.get("tag"):
         tfg, tbg, _ = TONES[c.get("tag_tone", "warn")]
         body += (f'{" " if body else ""}<span style="display:inline-block;white-space:nowrap;margin-left:{6 if body else 0}px;padding:1px 6px;border-radius:4px;'
@@ -228,6 +244,10 @@ def _mail_html(title, intro, facts, sections, link, link_title, code, stats=None
             part.append(f'<div style="font-size:15px;font-weight:600">{e(sec["title"])}</div>')
         if sec.get("note"):
             part.append(f'<div style="margin-top:2px;font-size:13px;color:{MUTED}">{e(sec["note"])}</div>')
+        if sec.get("legend"):                       # [(tone, meaning), ...] -> icons with their meaning
+            part.append(f'<div style="margin-top:8px;font-size:12px;color:{MUTED}">' + "".join(
+                f'<span style="display:inline-block;margin:0 16px 4px 0">{icon_html(t)}'
+                f'<span style="vertical-align:middle">{e(m)}</span></span>' for t, m in sec["legend"]) + "</div>")
         part.append('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
                     'style="margin-top:8px;font-size:13px;line-height:18px;border-collapse:collapse">')
         if sec.get("cols"):
