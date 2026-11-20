@@ -135,6 +135,11 @@ def task_t3monitor():
     return f"{len(sites)}/{len(sites)} site(s) checked"
 
 
+ADV_TONE = {"critical": "bad", "high": "bad", "medium": "warn", "low": "muted"}
+SEV_RANK = {"Critical": 0, "High": 1, "End of life": 1, "Unsupported": 1, "Security update": 2, "Medium": 3,
+            "Not rated": 4, "Update": 5, "Low": 6}
+
+
 def task_security():
     """PHP support status and security advisories of every site, from its last t3monitor snapshot.
     One summary message per run, only when there are findings not reported before."""
@@ -147,7 +152,8 @@ def task_security():
     except RuntimeError as e:
         ngx, ngx_err = {}, f" · {e}"
     adv = advisories({k for _, _, d in sites for k in site_packages(d)})
-    facts, n_adv, n_php, n_ngx, n_new = [], 0, 0, 0, 0
+    rows, n_adv, n_php, n_ngx, n_new = [], 0, 0, 0, 0
+    order = {p["id"]: i for i, p in enumerate(config()["projects"])}
     for p, env, d in sites:
         php = php_status(d.get("php"), cycles) if d.get("php") else None
         found = site_advisories(site_packages(d), adv)
@@ -168,19 +174,47 @@ def task_security():
         n_php += bool(php and php["severity"])
         n_ngx += bool(ngs and ngs["severity"])
         n_new += len(new)
-        if found or (php and php["severity"]) or (ngs and ngs["severity"]):
-            line = ([("NEW " if any(k.startswith("php:") for k in new) else "") + php["text"]]
-                    if php and php["severity"] else [])
-            line += ([("NEW " if any(k.startswith("nginx:") for k in new) else "") + ngs["text"]]
-                     if ngs and ngs["severity"] else [])
-            line += [("NEW " if f"adv:{a['id']}:{a['package']}:{a['version']}" in new else "")
-                     + f"{a['package']} {a['version']}: {a['title']}" + (f" ({a['severity']})" if a.get("severity") else "")
-                     + (f" {a['link']}" if a.get("link") else "") for a in found]
-            facts.append((f"{p['name']} ({T3M_ENVS[env]['label']})", " · ".join(line)))
+        site, label = p["name"], T3M_ENVS[env]["label"]
+        _sec_row = lambda st, lb, txt, sub, sev, is_new, _k=(order[p["id"]], list(T3M_ENVS).index(env)): (
+            is_new, (*_k, SEV_RANK[sev[0]]), [st, lb, {"text": txt, "sub": sub, **({"tag": "New", "tag_tone": "ok"} if is_new else {})},
+                                         {"text": "", "tag": sev[0], "tag_tone": sev[1]}])
+        if php and php["severity"]:
+            sev = ("End of life", "bad") if php["state"] == "eol" else (
+                ("Security update", "bad") if (cycles.get(".".join(str(php["version"]).split(".")[:2])) or {}).get("security")
+                else ("Update", "warn"))
+            rows.append(_sec_row(site, label, f"PHP {php['version']}" + (f" → {php['latest']}" if php.get("latest") else ""),
+                                 php["text"].split(" · ", 1)[-1], sev, any(k.startswith("php:") for k in new)))
+        if ngs and ngs["severity"]:
+            sev = ("Unsupported", "bad") if ngs["state"] == "unsupported" else ("Update", "warn")
+            rows.append(_sec_row(site, label, f"nginx {ngs['version']} → {ngs['latest']}", ngs["text"].split(" · ", 1)[-1], sev,
+                                 any(k.startswith("nginx:") for k in new)))
+        for x in found:
+            r = (x.get("severity") or "").lower()
+            sev = (r.capitalize(), ADV_TONE[r]) if r in ADV_TONE else ("Not rated", "warn")
+            rows.append(_sec_row(site, label, x["title"], " · ".join(
+                v for v in (f"{x['package']} {x['version']}", x.get("cve"), x.get("link")) if v), sev,
+                f"adv:{x['id']}:{x['package']}:{x['version']}" in new))
     summary = f"{_n(len(sites), 'site')} · {n_adv} security {'advisory' if n_adv == 1 else 'advisories'} · {_n(n_php, 'PHP issue')} · {_n(n_ngx, 'nginx issue')}{ngx_err}"
     if n_new:
+        new_rows = sorted((r for r in rows if r[0]), key=lambda r: r[1])
+        old_rows = sorted((r for r in rows if not r[0]), key=lambda r: r[1])
+        W = ["24%", "12%", "", "15%"]
+        cols = ["Site", "Environment", "Finding", "Severity"]
+        n_bad = sum(1 for r in new_rows if r[2][3]["tag_tone"] == "bad")
         notify_event(f"Security check: {n_new} new finding(s)", "Scheduled PHP, nginx and security advisory check.",
-                     facts, app_url(), "Open T3 Watchdock")
+                     [], app_url(), "Open T3 Watchdock",
+                     headline=f"{_n(n_new, 'new security finding')}",
+                     stats=[("New findings", n_new, "bad" if n_new else "muted"),
+                            ("High priority", n_bad, "bad" if n_bad else "muted"),
+                            ("Advisories", n_adv, "bad" if n_adv else "muted"),
+                            ("Sites checked", len(sites), None)],
+                     sections=[
+                         {"title": "New findings", "widths": W, "cols": cols,
+                          "note": "Severity: rating of the security advisory (Packagist); for PHP and nginx the "
+                                  "version status (security update, end of life, unsupported branch, update).",
+                          "rows": _grouped([r[2] for r in new_rows])},
+                         {"title": "Still open", "note": "Reported before and not fixed yet.", "widths": W,
+                          "cols": cols, "rows": _grouped([r[2] for r in old_rows])}])
     return summary + (f" · {n_new} new" if n_new else "")
 
 
