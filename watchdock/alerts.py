@@ -202,12 +202,12 @@ def _html_cell(c, first_plain):
 
 
 def _mail_html(title, intro, facts, sections, link, link_title, code, stats=None, headline=None):
-    """Email layout: 640px card on a grey page, built from tables so Outlook renders it too."""
+    """Email layout: 800px card on a grey page, built from tables so Outlook renders it too."""
     e = html.escape
     out = [f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{BG}" '
            f'style="background:{BG};font-family:{FONT};color:{INK}"><tr><td align="center" style="padding:24px 12px">'
-           f'<table role="presentation" width="640" cellpadding="0" cellspacing="0" '
-           f'style="width:100%;max-width:640px;background:#ffffff;border:1px solid {LINE};border-radius:8px">'
+           f'<table role="presentation" width="800" cellpadding="0" cellspacing="0" '
+           f'style="width:100%;max-width:800px;background:#ffffff;border:1px solid {LINE};border-radius:8px">'
            f'<tr><td style="padding:28px 32px 8px">'
            f'<div style="font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:{MUTED}">'
            f'T3 Watchdock</div>'
