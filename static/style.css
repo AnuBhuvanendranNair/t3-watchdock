@@ -785,3 +785,4 @@ details.vr-adv+details.vr-adv{border-top:1px solid var(--bd)}
 .vr-adv li .vr-ic{width:20px;height:20px}.vr-adv li .vr-ic .ic{width:13px;height:13px}
 .vr-adv li .sub{font-size:13px}
 @media (max-width:760px){.vr-adv-site{min-width:0}.vr-adv ul{padding-left:16px}}
+.vr-table td.vr-site{vertical-align:middle}

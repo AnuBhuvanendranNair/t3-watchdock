@@ -1421,8 +1421,9 @@ async function viewVersions(rep) {
   const sites = rep.sites.filter(s => vrFilter === "all" || (vrFilter === "bad" ? s.cells.some(x => x.tone === "bad") : need(s)));
   const stat = (k, n, sub, cls) => `<div class="t3stat"><div class="t3stat-k">${k}</div><div class="t3stat-v ${cls}">${n}</div><div class="sub">${sub}</div></div>`;
   let prev = null;
+  const span = {}; sites.forEach(s => span[s.project] = (span[s.project] || 0) + 1);   // environments per site
   const rows = sites.map(s => { const first = s.project !== prev; prev = s.project;
-    return `<tr class="${first ? "vr-first" : ""}"><td>${first ? `<a href="#/p/${encodeURIComponent(s.project)}">${esc(s.name)}</a>` : ""}</td>
+    return `<tr class="${first ? "vr-first" : ""}">${first ? `<td class="vr-site" rowspan="${span[s.project]}"><a href="#/p/${encodeURIComponent(s.project)}">${esc(s.name)}</a></td>` : ""}
       <td class="sub">${esc(s.env_label)}</td>
       ${s.cells.map((x, i) => `<td><div class="vr-cell">${vrIc(x.tone)}<div><b>${esc(x.version)}</b>
         <div class="sub">${i > 1 && x.kind ? esc(x.kind) + " · " : ""}${esc(x.label)}</div></div></div></td>`).join("")}</tr>`; }).join("");
