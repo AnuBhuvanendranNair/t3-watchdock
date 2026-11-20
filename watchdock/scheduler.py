@@ -41,7 +41,7 @@ def _grouped(rows):
 
 
 def _explain_failure(err):
-    """Plain-language problem and next step for a failed t3monitor check."""
+    """Plain-language problem and next step for a failed TYPO3 health check."""
     low = err.lower()
     if "encryption key" in low:
         return "The site rejects the t3monitor key", "Compare the key in the t3monitor extension with the one in T3 Watchdock"
@@ -106,7 +106,7 @@ def task_t3monitor():
     else:
         headline = f"All {_n(len(sites), 'site')} checked"
     W = ["30%", "16%"]                         # same Site / Environment column widths in every table
-    notify_event("t3monitor check: " + " · ".join(head),
+    notify_event("TYPO3 health check: " + " · ".join(head),
                  "Scheduled TYPO3 status check of every site with t3monitor.", [],
                  app_url(), "Open T3 Watchdock",
                  headline=headline,
@@ -144,7 +144,7 @@ def task_security():
                 if snaps:
                     sites.append((p, env, snaps[0]["data"]))
     if not sites:
-        return "No t3monitor data yet (run the t3monitor check first)"
+        return "No t3monitor data yet (run the TYPO3 health check first)"
     cycles = php_cycles()
     adv = advisories({k for _, _, d in sites for k in site_packages(d)})
     facts, n_adv, n_php, n_new = [], 0, 0, 0
@@ -208,14 +208,14 @@ TASKS = {
     "typo3_release": {"name": "TYPO3 release check", "run": task_typo3_release, "legacy": "check_interval_hours",
                       "description": "Checks get.typo3.org for new TYPO3 releases; on a new version the update "
                                      "pipeline of every project with TYPO3 auto-update is started."},
-    "t3monitor": {"name": "t3monitor check (TYPO3 & extensions)", "run": task_t3monitor, "legacy": "t3monitor_interval_hours",
+    "t3monitor": {"name": "TYPO3 health check (version, extensions, status)", "run": task_t3monitor, "legacy": "t3monitor_interval_hours",
                   "description": "Reads TYPO3 version, extensions and status checks of every project with "
                                  "t3monitor URL and key, and records changes in the history."},
     "security": {"name": "PHP version & security advisories", "run": task_security, "legacy": "security_interval_hours",
                  "defaults": {"mode": "daily", "time": "07:00"},
                  "description": "Checks the PHP version of every site against php.net support dates (endoflife.date) "
                                 "and TYPO3 core and extensions against known security advisories (Packagist). "
-                                "Uses the data of the last t3monitor check; messages only for new findings."},
+                                "Uses the data of the last TYPO3 health check; messages only for new findings."},
     "typo3_news": {"name": "TYPO3 security announcements", "run": task_typo3_news, "legacy": "typo3_news_interval_hours",
                    "defaults": {"hours": 3.0},
                    "description": "Reads the TYPO3 security feed (news.typo3.com): core and extension advisories and "

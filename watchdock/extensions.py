@@ -121,7 +121,7 @@ def ext_latest(composer, typo3):
 
 
 def t3m_add_updates(data):
-    """Adds latest/update/major to every public extension (errors never fail the t3monitor check)."""
+    """Adds latest/update/major to every public extension (errors never fail the TYPO3 health check)."""
     down = None                                      # Packagist unreachable -> skip the rest of this run
     for e in data["extensions"].values():
         if e.get("local") or not e.get("composer"):

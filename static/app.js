@@ -184,7 +184,7 @@ async function loadRunStatus() {
   if (Object.values(RUNST).some(r => BUSY.includes(r.status))) loadRunStatus.t = setTimeout(loadRunStatus, 8000);
 }
 
-// Projects page: technology filter (two steps: technology → version), data from the last t3monitor check (T3SUM).
+// Projects page: technology filter (two steps: technology → version), data from the last TYPO3 health check (T3SUM).
 // Versions are grouped: TYPO3 by major, the rest by product + major.minor. A project matches if production OR staging matches.
 const mm = v => (String(v || "").match(/\d+\.\d+/) || [""])[0];
 const TECH = {
@@ -324,7 +324,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
 const extUpdCls = x => x?.ext_updates ? (x.ext_major ? "extupd major" : "extupd") : "";
 const extUpdTitle = x => x?.ext_updates ? `${x.ext_updates} extension update${x.ext_updates === 1 ? "" : "s"} pending${x.ext_major ? ` (${x.ext_major} major)` : ""}` : "";
 
-// Overview table on the home page: TYPO3 version + errors/warnings per instance (data from the last t3monitor check)
+// Overview table on the home page: TYPO3 version + errors/warnings per instance (data from the last TYPO3 health check)
 let T3SUM = null;                  // last /api/t3monitor/summary response (reused on re-render: no "Loading…" flash)
 const overviewOptions = {sort:"original"};
 async function loadT3mSummary(pre) {
@@ -376,7 +376,7 @@ async function loadT3mSummary(pre) {
       <td class="sub">${checked ? esc(fmt(checked)) : "–"}</td></tr>`;
   }).join("");
   box.innerHTML = `<div class="head" style="margin-bottom:8px"><div><h2 style="margin:0">TYPO3 status – Production &amp; Staging</h2>
-      <div class="sub" data-secondary-copy>From the last t3monitor check · <a href="#/scheduler">Scheduler</a> · “–” = not configured</div></div>
+      <div class="sub" data-secondary-copy>From the last TYPO3 health check · <a href="#/scheduler">Scheduler</a> · “–” = not configured</div></div>
       <div class="overview-options">
         <select name="overview-sort" aria-label="Sort projects">
           ${[["original", "Project order"], ["name", "Project name"], ["checked", "Newest check"]].map(([value, label]) =>
@@ -744,7 +744,7 @@ function updHistoryBody(rows) {
       return `<tr class="${r.core ? "core" : ""} ${r.action}" ${r.composer && ver ? `data-composer="${esc(r.composer)}" data-version="${esc(ver)}" data-core="${r.core ? 1 : ""}"` : ""}>
       <td>${esc(dmy(r.t))}</td><td>${esc(r.old || "–")}</td><td class="act" title="${lbl}">${ic}</td><td>${esc(r.new || "–")}</td>
       <td><code>${esc(r.key)}</code></td><td>${esc(r.title)}</td><td class="rel-time"></td><td class="rel-sum"></td></tr>`; }).join("")}
-    </tbody></table></div><p class="sub" style="margin:6px 0 0">Recorded from t3monitor checks. Available since = release date of the installed version (removed: of the old version) on Packagist; description = first changelog line (GitHub/GitLab).</p>`;
+    </tbody></table></div><p class="sub" style="margin:6px 0 0">Recorded from TYPO3 health checks. Available since = release date of the installed version (removed: of the old version) on Packagist; description = first changelog line (GitHub/GitLab).</p>`;
 }
 async function loadReleaseInfo(det) {
   if (det.dataset.loaded) return;
@@ -1679,7 +1679,7 @@ const TOUR = [
   {route: "#/", el: "[data-act=tftoggle]", title: "Filter", text: "Filter the projects by technology and version."},
   {route: "#/", el: "[data-act=runall]", title: "Run all", text: "Starts the main pipeline (not production) of every CI/CD project."},
   {route: "#/", el: '#view a[href="#/new"]', title: "New project", text: "Add a GitLab project. Name, branches and manual jobs are pre-filled from GitLab."},
-  {route: "#/", el: "#t3sum", title: "TYPO3 status", text: "TYPO3 version, errors and warnings of every monitored instance from the last t3monitor check. ↑ = TYPO3 update available, ≠ = staging differs from production."},
+  {route: "#/", el: "#t3sum", title: "TYPO3 status", text: "TYPO3 version, errors and warnings of every monitored instance from the last TYPO3 health check. ↑ = TYPO3 update available, ≠ = staging differs from production."},
   {route: firstProject, el: "#view .pipe-env", title: "Pipelines", text: "Start a pipeline per environment with ▶. The current pipeline and its jobs appear here; production can be promoted after a successful staging pipeline."},
   {route: firstProject, el: '#view .head a[href$="/edit"]', title: "Edit project", text: "Branches, variables, auto-play jobs, TYPO3 auto-update, monitoring, and the responsible person shown on the card."},
   {route: "#/activity", el: "#view .card", title: "Activity", text: "All pipeline runs started from Watchdock and the activity log."},
