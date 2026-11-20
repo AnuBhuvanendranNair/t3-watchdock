@@ -8,7 +8,9 @@ import threading
 from .core import app_url, config, load, lock, log, now, save, save_config, stop_event
 from .db import kv_get, kv_set, sched_result_set, sched_results, typo3_latest
 from .alerts import notify_event
-from .security import advisories, php_cycles, php_status, site_advisories, site_packages, typo3_security_feed
+from .security import (_passed, advisories, nginx_latest, nginx_status, php_cycles, php_status, site_advisories,
+                       site_packages, typo3_security_feed)
+from .extensions import _vparse
 from .t3monitor import T3M_ENVS, _n, _upd_text, t3m_cfg, t3m_fetch, t3m_history_file, t3m_key
 from .watcher import check_typo3
 from .updates import send_update_commands
@@ -136,6 +138,54 @@ def task_t3monitor():
 def task_security():
     """PHP support status and security advisories of every site, from its last t3monitor snapshot.
     One summary message per run, only when there are findings not reported before."""
+    sites = _monitored_sites()
+    if not sites:
+        return "No t3monitor data yet (run the TYPO3 health check first)"
+    cycles = php_cycles()
+    try:
+        ngx, ngx_err = nginx_latest(), ""
+    except RuntimeError as e:
+        ngx, ngx_err = {}, f" · {e}"
+    adv = advisories({k for _, _, d in sites for k in site_packages(d)})
+    facts, n_adv, n_php, n_ngx, n_new = [], 0, 0, 0, 0
+    for p, env, d in sites:
+        php = php_status(d.get("php"), cycles) if d.get("php") else None
+        found = site_advisories(site_packages(d), adv)
+        keys = {f"adv:{a['id']}:{a['package']}:{a['version']}" for a in found}
+        if php and php["severity"]:
+            keys.add(f"php:{php['state']}:{php['version']}:{php.get('latest')}")
+        ngs = nginx_status(d.get("webserver"), ngx)
+        if ngs and ngs["severity"]:
+            keys.add(f"nginx:{ngs['state']}:{ngs['version']}:{ngs['latest']}")
+        with lock:
+            hf = t3m_history_file(p["id"], env)
+            h = load(hf, {"snapshots": []})
+            new = keys - set((h.get("security") or {}).get("reported", []))
+            h["security"] = {"checked": now(), "php": php, "advisories": found, "nginx": ngs,
+                             "reported": sorted(keys)}
+            save(hf, h)
+        n_adv += len(found)
+        n_php += bool(php and php["severity"])
+        n_ngx += bool(ngs and ngs["severity"])
+        n_new += len(new)
+        if found or (php and php["severity"]) or (ngs and ngs["severity"]):
+            line = ([("NEW " if any(k.startswith("php:") for k in new) else "") + php["text"]]
+                    if php and php["severity"] else [])
+            line += ([("NEW " if any(k.startswith("nginx:") for k in new) else "") + ngs["text"]]
+                     if ngs and ngs["severity"] else [])
+            line += [("NEW " if f"adv:{a['id']}:{a['package']}:{a['version']}" in new else "")
+                     + f"{a['package']} {a['version']}: {a['title']}" + (f" ({a['severity']})" if a.get("severity") else "")
+                     + (f" {a['link']}" if a.get("link") else "") for a in found]
+            facts.append((f"{p['name']} ({T3M_ENVS[env]['label']})", " · ".join(line)))
+    summary = f"{_n(len(sites), 'site')} · {n_adv} security {'advisory' if n_adv == 1 else 'advisories'} · {_n(n_php, 'PHP issue')} · {_n(n_ngx, 'nginx issue')}{ngx_err}"
+    if n_new:
+        notify_event(f"Security check: {n_new} new finding(s)", "Scheduled PHP, nginx and security advisory check.",
+                     facts, app_url(), "Open T3 Watchdock")
+    return summary + (f" · {n_new} new" if n_new else "")
+
+
+def _monitored_sites():
+    """(project, env, newest t3monitor data) of every instance with t3monitor URL, key and at least one snapshot."""
     sites = []
     for p in config()["projects"]:
         for env in T3M_ENVS:
@@ -143,38 +193,48 @@ def task_security():
                 snaps = load(t3m_history_file(p["id"], env), {"snapshots": []}).get("snapshots")
                 if snaps:
                     sites.append((p, env, snaps[0]["data"]))
-    if not sites:
-        return "No t3monitor data yet (run the TYPO3 health check first)"
+    return sites
+
+
+def task_releases():
+    """New PHP releases (php.net) and nginx releases (nginx.org) on the day they come out. One message per run,
+    with the sites that still run an older version. The first run only stores what is there."""
+    today = datetime.date.today().isoformat()
     cycles = php_cycles()
-    adv = advisories({k for _, _, d in sites for k in site_packages(d)})
-    facts, n_adv, n_php, n_new = [], 0, 0, 0
-    for p, env, d in sites:
-        php = php_status(d.get("php"), cycles) if d.get("php") else None
-        found = site_advisories(site_packages(d), adv)
-        keys = {f"adv:{a['id']}:{a['package']}:{a['version']}" for a in found}
-        if php and php["severity"]:
-            keys.add(f"php:{php['state']}:{php['version']}:{php.get('latest')}")
-        with lock:
-            hf = t3m_history_file(p["id"], env)
-            h = load(hf, {"snapshots": []})
-            new = keys - set((h.get("security") or {}).get("reported", []))
-            h["security"] = {"checked": now(), "php": php, "advisories": found, "reported": sorted(keys)}
-            save(hf, h)
-        n_adv += len(found)
-        n_php += bool(php and php["severity"])
-        n_new += len(new)
-        if found or (php and php["severity"]):
-            line = ([("NEW " if any(k.startswith("php:") for k in new) else "") + php["text"]]
-                    if php and php["severity"] else [])
-            line += [("NEW " if f"adv:{a['id']}:{a['package']}:{a['version']}" in new else "")
-                     + f"{a['package']} {a['version']}: {a['title']}" + (f" ({a['severity']})" if a.get("severity") else "")
-                     + (f" {a['link']}" if a.get("link") else "") for a in found]
-            facts.append((f"{p['name']} ({T3M_ENVS[env]['label']})", " · ".join(line)))
-    summary = f"{_n(len(sites), 'site')} · {n_adv} security {'advisory' if n_adv == 1 else 'advisories'} · {_n(n_php, 'PHP issue')}"
-    if n_new:
-        notify_event(f"Security check: {n_new} new finding(s)", "Scheduled PHP version and security advisory check.",
+    cur = {f"php:{k}": c["latest"] for k, c in cycles.items()
+           if c.get("latest") and not _passed(c.get("eol"), today)}
+    ngx = nginx_latest()
+    cur.update({f"nginx:{b}": v for b, v in ngx.items()})
+    with lock:
+        old = kv_get("releases") or {}
+        first, seen = "seen" not in old, old.get("seen", {})
+        newer = lambda k: not seen.get(k) or (_vparse(cur[k]) or ((0,),))[0] > (_vparse(seen[k]) or ((0,),))[0]
+        new = [] if first else [k for k in cur if newer(k)]
+        kv_set("releases", {"checked": now(), "seen": {**seen, **{k: cur[k] for k in cur if newer(k)}}})
+    if new:
+        sites, facts = _monitored_sites(), []
+        for k in new:
+            kind, branch = k.split(":")
+            if kind == "php":
+                c = cycles.get(branch, {})
+                hit = [(p, env) for p, env, d in sites if d.get("php") and str(d["php"]).startswith(branch + ".")
+                       and php_status(d["php"], cycles)["severity"]]
+                label = f"PHP {cur[k]}" + (" (security release)" if c.get("security") else "")
+            else:
+                hit = [(p, env) for p, env, d in sites
+                       if (st := nginx_status(d.get("webserver"), ngx)) and st["severity"]
+                       and st["state"] in (branch, "unsupported")]
+                label = f"nginx {cur[k]} ({branch})"
+            facts.append((label, (f"{_n(len(hit), 'site')} on an older version: " + ", ".join(
+                f"{p['name']} ({T3M_ENVS[env]['label']})" for p, env in hit)) if hit else "No monitored site affected"))
+            log(f"New release: {label}")
+        notify_event("New release: " + " · ".join(f[0] for f in facts),
+                     "New PHP or nginx versions are out (php.net, nginx.org). Listed sites run an older version; "
+                     "the PHP, nginx & security advisories check lists them per site.",
                      facts, app_url(), "Open T3 Watchdock")
-    return summary + (f" · {n_new} new" if n_new else "")
+    if first:
+        return f"{len(cur)} branches stored as baseline (messages from the next release on)"
+    return " · ".join(f"{k.replace(':', ' ')} {v}" for k, v in cur.items()) + (f" · {len(new)} new" if new else "")
 
 
 def task_typo3_news():
@@ -211,9 +271,14 @@ TASKS = {
     "t3monitor": {"name": "TYPO3 health check (version, extensions, status)", "run": task_t3monitor, "legacy": "t3monitor_interval_hours",
                   "description": "Reads TYPO3 version, extensions and status checks of every project with "
                                  "t3monitor URL and key, and records changes in the history."},
-    "security": {"name": "PHP version & security advisories", "run": task_security, "legacy": "security_interval_hours",
+    "releases": {"name": "PHP & nginx releases", "run": task_releases, "legacy": "releases_interval_hours",
+                 "defaults": {"hours": 3.0},
+                 "description": "Checks php.net and nginx.org for new releases; one message per new version with "
+                                "the monitored sites that still run an older version."},
+    "security": {"name": "PHP, nginx & security advisories", "run": task_security, "legacy": "security_interval_hours",
                  "defaults": {"mode": "daily", "time": "07:00"},
-                 "description": "Checks the PHP version of every site against php.net support dates (endoflife.date) "
+                 "description": "Checks the PHP version of every site against the newest release (php.net) and support "
+                                "dates (endoflife.date), nginx against the current mainline and stable release (nginx.org), "
                                 "and TYPO3 core and extensions against known security advisories (Packagist). "
                                 "Uses the data of the last TYPO3 health check; messages only for new findings."},
     "typo3_news": {"name": "TYPO3 security announcements", "run": task_typo3_news, "legacy": "typo3_news_interval_hours",

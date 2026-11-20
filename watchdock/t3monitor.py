@@ -333,6 +333,7 @@ def t3m_summary():
                 "ext_updates": len(upd), "ext_major": sum(1 for x in upd if x.get("major")),
                 "advisories": len((h.get("security") or {}).get("advisories") or []),
                 "php_check": (h.get("security") or {}).get("php"),
+                "nginx_check": (h.get("security") or {}).get("nginx"),
                 "last_check": h.get("last_check"), "last_error": h.get("last_error")}
     return out
 
