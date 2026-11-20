@@ -786,3 +786,4 @@ details.vr-adv+details.vr-adv{border-top:1px solid var(--bd)}
 .vr-adv li .sub{font-size:13px}
 @media (max-width:760px){.vr-adv-site{min-width:0}.vr-adv ul{padding-left:16px}}
 .vr-table td.vr-site{vertical-align:middle}
+.typo3-overview td a.vr-site-link{font-weight:400}.vr-site-link{color:inherit;display:inline-flex;align-items:center;gap:4px}.vr-site-link:hover{color:var(--acc)}

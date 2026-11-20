@@ -1424,7 +1424,7 @@ async function viewVersions(rep) {
   const span = {}; sites.forEach(s => span[s.project] = (span[s.project] || 0) + 1);   // environments per site
   const rows = sites.map(s => { const first = s.project !== prev; prev = s.project;
     return `<tr class="${first ? "vr-first" : ""}">${first ? `<td class="vr-site" rowspan="${span[s.project]}"><a href="#/p/${encodeURIComponent(s.project)}">${esc(s.name)}</a></td>` : ""}
-      <td class="sub">${esc(s.env_label)}</td>
+      <td class="sub">${s.url ? `<a class="vr-site-link" href="${esc(s.url)}" target="_blank" rel="noopener" title="Open ${esc(s.url)}">${esc(s.env_label)} ${ic("ext", "sm")}</a>` : esc(s.env_label)}</td>
       ${s.cells.map((x, i) => `<td><div class="vr-cell">${vrIc(x.tone)}<div><b>${esc(x.version)}</b>
         <div class="sub">${i > 1 && x.kind ? esc(x.kind) + " · " : ""}${esc(x.label)}</div></div></div></td>`).join("")}</tr>`; }).join("");
   // advisories: one collapsible row per site and environment, summary = count per severity
