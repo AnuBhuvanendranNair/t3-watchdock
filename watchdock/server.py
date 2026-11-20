@@ -21,7 +21,7 @@ from .watcher import resume_mail_watches
 from .projects import add_project, export_projects, import_projects, update_monitoring, update_project
 from .updates import send_now
 from .plugins import NotFound, asset as plugin_asset, assets as plugin_assets, call as plugin_call, catalog as plugin_catalog, save_plugin
-from .scheduler import TASKS, save_sched, sched_run, sched_view, scheduler
+from .scheduler import TASKS, save_sched, sched_run, sched_view, scheduler, version_report
 
 
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"),        # fixed allowlist, no path traversal
@@ -422,6 +422,24 @@ def email_test():
 def check_now():
     good, result = sched_run("typo3_release")
     return send(200 if good else 500, {"ok": True} if good else {"error": result})
+
+
+@app.get("/api/versions")
+def versions_get():
+    """Last version report (Versions page); computed once if there is none yet."""
+    from .db import kv_get
+    try:
+        return ok(kv_get("version_report") or version_report())
+    except RuntimeError as e:
+        return send(409, {"error": str(e)})
+
+
+@app.post("/api/versions/refresh")
+def versions_refresh():
+    try:
+        return ok(version_report())
+    except RuntimeError as e:
+        return send(409, {"error": str(e)})
 
 
 @app.post("/api/scheduler")

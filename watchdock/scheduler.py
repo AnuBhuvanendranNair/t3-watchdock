@@ -273,43 +273,46 @@ def task_releases():
     return " · ".join(f"{k.replace(':', ' ')} {v}" for k, v in cur.items()) + (f" · {len(new)} new" if new else "")
 
 
-def task_daily_report():
-    """Daily version report: TYPO3, PHP, database and nginx of every site against the newest releases, plus the
-    known security advisories. Sent on every run, also when everything is current."""
+REPORT_COLS = [("typo3", "TYPO3"), ("php", "PHP"), ("db", "Database"), ("web", "Web server")]
+
+
+def version_report():
+    """TYPO3, PHP, database and web server of every site against the newest releases, plus known advisories.
+    Shared by the daily email and the Versions page; the last result is kept in kv 'version_report'."""
     sites = _monitored_sites()
     if not sites:
-        return "No t3monitor data yet (run the TYPO3 health check first)"
+        raise RuntimeError("No t3monitor data yet (run the TYPO3 health check first)")
     rel = release_data()
     order = {p["id"]: i for i, p in enumerate(config()["projects"])}
     envs = list(T3M_ENVS)
-    rows, adv_rows, count = [], [], {t: 0 for t in ICONS}
-    cell = lambda x: {"text": x["version"], "sub": x["label"], "icon": x["tone"]}
+    out, advs, count = [], [], {t: 0 for t in ICONS}
     for p, env, d in sorted(sites, key=lambda x: (order.get(x[0]["id"], 999), envs.index(x[1]))):
-        label = T3M_ENVS[env]["label"]
+        base = {"project": p["id"], "name": p["name"], "env": env, "env_label": T3M_ENVS[env]["label"]}
         pos = (order.get(p["id"], 999), envs.index(env))   # advisories: by site, then severity
         adv = (load(t3m_history_file(p["id"], env), {"snapshots": []}).get("security") or {}).get("advisories") or []
         db, kind = db_state(d.get("db"), rel)
         web, wname, cves = web_state(d.get("webserver"), rel)
-        st = [typo3_state(d.get("typo3"), adv, rel), php_state(d.get("php"), rel), db, web]
-        for x in st:
+        cells = [{**typo3_state(d.get("typo3"), adv, rel), "kind": "TYPO3"}, {**php_state(d.get("php"), rel), "kind": "PHP"},
+                 {**db, "kind": kind}, {**web, "kind": wname}]
+        for x in cells:
             count[x["tone"]] += 1
-        rows.append([p["name"], label, cell(st[0]), cell(st[1]),
-                     {**cell(db), "sub": f"{kind} · {db['label']}"}, {**cell(web), "sub": f"{wname} · {web['label']}"}])
+        out.append({**base, "cells": cells})
+        add = lambda rank, **kw: advs.append({**base, "_k": (pos, rank), **kw})
         low = [x for x in cves if x["rating"] == "low"]
         if low:                                     # low-rated Apache CVEs: one summary row
-            adv_rows.append(((pos, ADV_RANK["low"]), [p["name"], label,
-                             {"text": f"{_n(len(low), 'low-rated Apache CVE')}", "sub": ", ".join(x["cve"] for x in low)},
-                             {"text": "Low", "icon": "muted"}]))
+            add(ADV_RANK["low"], title=_n(len(low), "low-rated Apache CVE"), sub=", ".join(x["cve"] for x in low),
+                severity="Low", tone="muted", link=None)
         for x in (x for x in cves if x["rating"] != "low"):
-            adv_rows.append(((pos, ADV_RANK.get(x["rating"], 2)), [p["name"], label,
-                             {"text": f"{x['cve']}: {x['title']}", "sub": f"Apache {web['version']} · fixed in {x['fixed']}"},
-                             {"text": x["rating"].capitalize(), "icon": "bad" if x["rating"] in APACHE_BAD
-                              else "warn" if x["rating"] == "moderate" else "muted"}]))
+            add(ADV_RANK.get(x["rating"], 2), title=f"{x['cve']}: {x['title']}",
+                sub=f"Apache {web['version']} · fixed in {x['fixed']}", severity=x["rating"].capitalize(),
+                tone="bad" if x["rating"] in APACHE_BAD else "warn" if x["rating"] == "moderate" else "muted",
+                link=f"https://www.cve.org/CVERecord?id={x['cve']}")
         for a in {(a["package"], a["title"]): a for a in adv}.values():   # same advisory from several sources
             r = (a.get("severity") or "").lower()
-            adv_rows.append(((pos, ADV_RANK.get(r, 2)), [p["name"], label,
-                             {"text": a["title"], "sub": " · ".join(x for x in (f"{a['package']} {a['version']}", a.get("cve")) if x)},
-                             {"text": r.capitalize() or "Not rated", "icon": ADV_TONE.get(r, "warn")}]))
+            add(ADV_RANK.get(r, 2), title=a["title"],
+                sub=" · ".join(x for x in (f"{a['package']} {a['version']}", a.get("cve")) if x),
+                severity=r.capitalize() or "Not rated", tone=ADV_TONE.get(r, "warn"), link=a.get("link"))
+    advs.sort(key=lambda x: x.pop("_k"))
     today = datetime.date.today().isoformat()
     live = lambda cy: [c["latest"] for k, c in sorted(cy.items(), key=lambda kv: _vparse(kv[0]) or ((0,), 0), reverse=True)
                        if c.get("latest") and not _passed(c.get("eol"), today)]
@@ -319,25 +322,43 @@ def task_daily_report():
               ["MySQL", " · ".join(live(rel["mysql"])[:3]) or "–"],
               ["nginx", " · ".join(f"{v} ({b})" for b, v in rel["nginx"].items()) or "–"],
               ["Apache", " · ".join(live(rel["apache"])) or "–"]]
+    rep = {"generated": now(), "sites": out, "advisories": advs, "newest": newest, "counts": count,
+           "cols": [c for _, c in REPORT_COLS], "legend": [[t, m] for t, (_, m) in ICONS.items()]}
+    kv_set("version_report", rep)
+    return rep
+
+
+def task_daily_report():
+    """Daily version report email (see version_report). Sent on every run, also when everything is current."""
+    try:
+        rep = version_report()
+    except RuntimeError as e:
+        return str(e)
+    count, n = rep["counts"], len(rep["sites"])
+    cell = lambda x, kind=True: {"text": x["version"], "icon": x["tone"],
+                                 "sub": f"{x['kind']} · {x['label']}" if kind else x["label"]}
+    rows = [[s["name"], s["env_label"], cell(s["cells"][0], False), cell(s["cells"][1], False),
+             cell(s["cells"][2]), cell(s["cells"][3])] for s in rep["sites"]]
+    adv_rows = [[a["name"], a["env_label"], {"text": a["title"], "sub": a["sub"]},
+                 {"text": a["severity"], "icon": a["tone"]}] for a in rep["advisories"]]
     bad, warn = count["bad"], count["warn"]
-    headline = (f"All {_n(len(sites), 'site')} up to date" if not bad and not warn else
+    headline = (f"All {_n(n, 'site')} up to date" if not bad and not warn else
                 " · ".join(x for x in (bad and f"{bad} security / end of life", warn and _n(warn, "update")) if x))
     notify_event(f"Daily version report: {bad} critical · {_n(warn, 'update')}",
                  "TYPO3, PHP, database and web server of every site compared with the newest releases.", [],
-                 app_url(), "Open T3 Watchdock", headline=headline,
-                 stats=[("Sites", len(sites), None), ("Security / end of life", bad, "bad" if bad else "muted"),
+                 app_url("#/versions"), "Open version report", headline=headline,
+                 stats=[("Sites", n, None), ("Security / end of life", bad, "bad" if bad else "muted"),
                         ("Updates", warn, "warn" if warn else "muted"), ("Current", count["ok"], "ok" if count["ok"] else "muted")],
                  sections=[
-                     {"title": "Sites", "legend": [(t, m) for t, (_, m) in ICONS.items()],
+                     {"title": "Sites", "legend": [tuple(x) for x in rep["legend"]],
                       "widths": ["15%", "11%", "19%", "18%", "19%", "18%"],
-                      "cols": ["Site", "Environment", "TYPO3", "PHP", "Database", "Web server"],
-                      "rows": _grouped(rows)},
+                      "cols": ["Site", "Environment", *rep["cols"]], "rows": _grouped(rows)},
                      {"title": "Security advisories", "note": "Known advisories for TYPO3 core and the public extensions (Packagist) "
                               "and Apache httpd CVEs (httpd.apache.org) for the installed version.",
                       "widths": ["16%", "10%", "", "12%"], "cols": ["Site", "Environment", "Advisory", "Severity"],
-                      "rows": _grouped([r for _, r in sorted(adv_rows, key=lambda x: x[0])])},
-                     {"title": "Newest releases", "rows": newest}])
-    return f"{_n(len(sites), 'site')} · {bad} critical · {_n(warn, 'update')} · {len(adv_rows)} advisories"
+                      "rows": _grouped(adv_rows)},
+                     {"title": "Newest releases", "rows": rep["newest"]}])
+    return f"{_n(n, 'site')} · {bad} critical · {_n(warn, 'update')} · {len(adv_rows)} advisories"
 
 
 def task_typo3_news():

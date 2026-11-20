@@ -113,6 +113,7 @@ async function render() {
   if (a === "plugins") return viewPlugins();
   if (a === "profile") return viewProfile();
   if (a === "scheduler") return viewScheduler();
+  if (a === "versions") return viewVersions();
   if (a === "p" && b) {
     const p = proj(decodeURIComponent(b));
     if (!p) return $("#view").innerHTML = `<p class="empty">Project not found. <a href="#/">Back</a></p>`;
@@ -1401,6 +1402,67 @@ function schedResult(r) {   // "21/24 OK. A: msg | B: msg" -> summary + one row 
     return i < 0 ? `<li>${esc(cut(it))}</li>` : `<li><b>${esc(it.slice(0, i))}</b> <span>${esc(cut(it.slice(i + 2)))}</span></li>`; }) : [];
   return `<p class="sched-sum">${x[1]} of ${x[2]} projects OK</p>${rows.length ? `<ul class="sched-fails">${rows.join("")}</ul>` : ""}`;
 }
+// Versions page: TYPO3, PHP, database and web server of every site against the newest releases (same data as the
+// daily version report email). GET shows the last report; the refresh button computes a new one.
+const VR_TONE = {bad: ["err", "Security issue or end of life"], warn: ["update", "Update available"],
+                 ok: ["ok", "Current"], muted: ["info", "Not checked"]};
+const vrIc = t => `<span class="vr-ic vr-${t}" title="${esc(VR_TONE[t][1])}">${ic(VR_TONE[t][0])}</span>`;
+let vrFilter = "all";
+async function viewVersions(rep) {
+  const v = $("#view");
+  v.dataset.pview = "versions";
+  if (!rep) {
+    v.innerHTML = `<div class="sched"><div class="sched-head"><h1>Versions</h1><p>Loading…</p></div></div>`;
+    try { rep = await api("/api/versions"); }
+    catch (e) { v.innerHTML = `<div class="sched"><div class="sched-head"><h1>Versions</h1></div><p class="empty">${esc(e.message)}</p></div>`; return; }
+    if (v.dataset.pview !== "versions") return;
+  }
+  const c = rep.counts, need = s => s.cells.some(x => x.tone === "bad" || x.tone === "warn");
+  const sites = rep.sites.filter(s => vrFilter === "all" || (vrFilter === "bad" ? s.cells.some(x => x.tone === "bad") : need(s)));
+  const stat = (k, n, sub, cls) => `<div class="t3stat"><div class="t3stat-k">${k}</div><div class="t3stat-v ${cls}">${n}</div><div class="sub">${sub}</div></div>`;
+  let prev = null;
+  const rows = sites.map(s => { const first = s.project !== prev; prev = s.project;
+    return `<tr class="${first ? "vr-first" : ""}"><td>${first ? `<a href="#/p/${encodeURIComponent(s.project)}">${esc(s.name)}</a>` : ""}</td>
+      <td class="sub">${esc(s.env_label)}</td>
+      ${s.cells.map((x, i) => `<td><div class="vr-cell">${vrIc(x.tone)}<div><b>${esc(x.version)}</b>
+        <div class="sub">${i > 1 && x.kind ? esc(x.kind) + " · " : ""}${esc(x.label)}</div></div></div></td>`).join("")}</tr>`; }).join("");
+  prev = null;
+  const advs = rep.advisories.filter(a => vrFilter !== "bad" || a.tone === "bad").map(a => { const k = a.project + a.env, first = k !== prev; prev = k;
+    return `<tr class="${first ? "vr-first" : ""}"><td>${first ? esc(a.name) : ""}</td><td class="sub">${first ? esc(a.env_label) : ""}</td>
+      <td>${/^https?:\/\//.test(a.link || "") ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ${ic("ext", "sm")}</a>` : esc(a.title)}
+        <div class="sub">${esc(a.sub)}</div></td>
+      <td><div class="vr-cell">${vrIc(a.tone)}<span>${esc(a.severity)}</span></div></td></tr>`; }).join("");
+  v.innerHTML = `<div class="sched vr">
+    <div class="sched-head vr-head"><div><h1>Versions</h1>
+      <p>TYPO3, PHP, database and web server of every site compared with the newest releases · updated ${esc(relTime(rep.generated))} · daily email in <a href="#/scheduler">Scheduler</a></p></div>
+      ${progBtn("versions", "Refresh versions now", `data-act="vrrefresh"`)}</div>
+    <div class="t3stats vr-stats">
+      ${stat("Sites", rep.sites.length, "Production and staging", "")}
+      ${stat("Security / end of life", c.bad, "Needs action", c.bad ? "sev-2" : "")}
+      ${stat("Updates", c.warn, "Newer release available", c.warn ? "sev-1" : "")}
+      ${stat("Current", c.ok, `${c.muted} not checked`, c.ok ? "sev0" : "")}</div>
+    <div class="vr-bar"><div class="vr-legend">${Object.keys(VR_TONE).map(t => `<span>${vrIc(t)}${esc(VR_TONE[t][1])}</span>`).join("")}</div>
+      <select name="vr-filter" aria-label="Filter sites">${[["all", "All sites"], ["need", "Needs action"], ["bad", "Security / end of life only"]]
+        .map(([k, l]) => `<option value="${k}" ${vrFilter === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div class="wrap"><table class="typo3-overview vr-table"><thead><tr><th>Site</th><th>Environment</th>${rep.cols.map(x => `<th>${esc(x)}</th>`).join("")}</tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" class="empty">Nothing to show for this filter.</td></tr>`}</tbody></table></div>
+    <h2 class="vr-h2">Security advisories <span class="sub">${rep.advisories.length}</span></h2>
+    <p class="sub vr-note">TYPO3 core and public extensions (Packagist) and Apache httpd CVEs (httpd.apache.org) for the installed version.</p>
+    ${advs ? `<div class="wrap"><table class="typo3-overview vr-table"><thead><tr><th>Site</th><th>Environment</th><th>Advisory</th><th>Severity</th></tr></thead><tbody>${advs}</tbody></table></div>`
+      : `<p class="empty">No known security advisories.</p>`}
+    <h2 class="vr-h2">Newest releases</h2>
+    <div class="vr-newest">${rep.newest.map(([k, x]) => `<div><span class="sub">${esc(k)}</span><b>${esc(x)}</b></div>`).join("")}</div>
+  </div>`;
+  v.querySelector("[name=vr-filter]").onchange = e => { vrFilter = e.target.value; viewVersions(rep); };
+  v.querySelector("[data-act=vrrefresh]").onclick = async () => {
+    let fresh = null, err = null;
+    await runProg("versions", [async () => { try { fresh = await api("/api/versions/refresh", {}); } catch (e) { err = e; throw e; } }], 1);
+    if (v.dataset.pview !== "versions") return;
+    if (err) return toast(err.message, true);
+    viewVersions(fresh);
+  };
+}
+
 function viewScheduler() {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   $("#view").innerHTML = `
