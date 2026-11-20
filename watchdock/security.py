@@ -1,4 +1,4 @@
-"""PHP version support (endoflife.date), security advisories for TYPO3 core and extensions (Packagist)
+"""PHP version support (endoflife.date, newest releases from php.net), nginx versions (nginx.org), security advisories for TYPO3 core and extensions (Packagist)
 and the TYPO3 security announcement feed (news.typo3.com)."""
 import datetime
 import email.utils
@@ -11,6 +11,8 @@ import xml.etree.ElementTree as ET
 from .extensions import _vparse, constraint_ok
 
 PHP_EOL_API = "https://endoflife.date/api/php.json"             # per branch: latest, support (active), eol
+PHP_RELEASES_API = "https://www.php.net/releases/index.php?json&max=1&version={}"  # newest release of one branch
+NGINX_DOWNLOAD = "https://nginx.org/en/download.html"           # current mainline and stable version
 ADVISORY_API = "https://packagist.org/api/security-advisories/"  # FriendsOfPHP + GitHub advisories per package
 ADVISORY_BATCH = 100                                            # packages per request
 TYPO3_SEC_FEED = "https://news.typo3.com/security/rss-security"  # advisories + public service announcements (PSA)
@@ -24,11 +26,61 @@ def _json(url, data=None):
 
 
 def php_cycles():
-    """{'8.4': {'cycle': '8.4', 'latest': '8.4.27', 'support': '2026-12-31', 'eol': '2028-12-31', ...}, ...}"""
+    """{'8.4': {'cycle': '8.4', 'latest': '8.4.27', 'support': '2026-12-31', 'eol': '2028-12-31', ...}, ...}
+    Support dates come from endoflife.date; 'latest' of supported branches from php.net, which has new
+    releases on the day they come out (endoflife.date can be days behind). 'security' = release is a security release."""
     try:
-        return {str(c["cycle"]): c for c in _json(PHP_EOL_API)}
+        cycles = {str(c["cycle"]): c for c in _json(PHP_EOL_API)}
     except Exception as e:
         raise RuntimeError(f"PHP release data (endoflife.date) not available: {e}") from None
+    today = datetime.date.today().isoformat()
+    for k, c in cycles.items():
+        if _passed(c.get("eol"), today):
+            continue
+        try:
+            ver, info = next(iter(_json(PHP_RELEASES_API.format(k)).items()))
+        except Exception:
+            continue  # php.net unavailable: keep the endoflife.date value
+        if _vparse(ver) and (not _vparse(c.get("latest")) or _vparse(ver)[0] >= _vparse(c["latest"])[0]):
+            c.update(latest=ver, latestReleaseDate=info.get("date") or c.get("latestReleaseDate"),
+                     security="security" in (info.get("tags") or []))
+    return cycles
+
+
+def nginx_latest():
+    """{'mainline': '1.31.9', 'stable': '1.30.7'} from the nginx.org download page."""
+    req = urllib.request.Request(NGINX_DOWNLOAD, headers={"User-Agent": "t3-watchdock"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            page = r.read(500_000).decode("utf-8", "replace")
+    except Exception as e:
+        raise RuntimeError(f"nginx versions (nginx.org) not available: {e}") from None
+    out = {}
+    for kind in ("mainline", "stable"):
+        m = re.search(kind + r" version.*?nginx-(\d+\.\d+\.\d+)\.tar\.gz", page, re.I | re.S)
+        if m:
+            out[kind] = m.group(1)
+    if not out:
+        raise RuntimeError("nginx versions not found on nginx.org")
+    return out
+
+
+def nginx_status(server, latest):
+    """None if the web server is not nginx or has no version. severity: 2 = branch no longer supported
+    (only the current mainline and stable branch get fixes), 1 = newer release of the same branch, 0 = current."""
+    m = re.match(r"nginx/(\d+\.\d+\.\d+)", (server or "").strip(), re.I)
+    if not m or not latest:
+        return None
+    v = m.group(1)
+    branch = next((b for b, lv in latest.items() if lv.split(".")[:2] == v.split(".")[:2]), None)
+    if not branch:
+        tips = " or ".join(f"{b} {lv}" for b, lv in latest.items())
+        return {"version": v, "state": "unsupported", "latest": latest.get("stable") or latest.get("mainline"),
+                "severity": 2, "text": f"nginx {v} · branch {'.'.join(v.split('.')[:2])} no longer supported · update to {tips}"}
+    lv = latest[branch]
+    outdated = _vparse(lv)[0] > _vparse(v)[0]
+    return {"version": v, "state": branch, "latest": lv, "severity": 1 if outdated else 0,
+            "text": f"nginx {v} ({branch})" + (f" · update to {lv} available" if outdated else " · current")}
 
 
 def _passed(v, today):
@@ -54,7 +106,7 @@ def php_status(version, cycles):
     elif isinstance(eol, str):
         parts.append(f"supported until {eol}")
     if outdated:
-        parts.append(f"update to {latest} available")
+        parts.append(f"update to {latest} available" + (" (security release)" if c.get("security") else ""))
     return {"version": version, "state": state, "latest": latest, "eol": eol if isinstance(eol, str) else None,
             "severity": 2 if state == "eol" else 1 if outdated else 0, "text": " · ".join(parts)}
 

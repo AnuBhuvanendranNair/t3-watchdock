@@ -355,7 +355,8 @@ async function loadT3mSummary(pre) {
     const chips = [x.errors && hc("err", "sev-2", x.errors, pl(x.errors, "error")),
       x.warnings && hc("warn", "sev-1", x.warnings, pl(x.warnings, "warning")),
       x.advisories && hc("shield", "sev-2", x.advisories, `${pl(x.advisories, "security advisory", "security advisories")} affect this instance`),
-      x.php_check?.severity && hc("clock", `sev-${x.php_check.severity}`, "PHP", x.php_check.text)].filter(Boolean);
+      x.php_check?.severity && hc("clock", `sev-${x.php_check.severity}`, "PHP", x.php_check.text),
+      x.nginx_check?.severity && hc("clock", `sev-${x.nginx_check.severity}`, "nginx", x.nginx_check.text)].filter(Boolean);
     return chips.join("") || hc("ok", "sev0", "OK", "No errors, warnings or security advisories");
   };
   const projects = S.projects.map(p => {
@@ -563,10 +564,10 @@ const sevBadge = n => `<span class="badge ${Number(n) === 0 ? "sev0" : "sev-" + 
 const verCmp = (a, b) => { const x = String(a).split("."), y = String(b).split(".");
   for (let i = 0; i < 3; i++) { const d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0); if (d) return d; } return 0; };
 
-// Security section of an instance (result of the scheduled "PHP version & security advisories" task)
+// Security section of an instance (result of the scheduled "PHP, nginx & security advisories" task)
 function secBody(sec) {
-  const adv = sec.advisories || [], php = sec.php;
-  return `<p class="sub" style="margin:0 0 8px">${php ? esc(php.text) : "PHP version unknown"} · checked ${esc(fmt(sec.checked))}</p>
+  const adv = sec.advisories || [], php = sec.php, ngx = sec.nginx;
+  return `<p class="sub" style="margin:0 0 8px">${php ? esc(php.text) : "PHP version unknown"}${ngx ? ` · ${esc(ngx.text)}` : ""} · checked ${esc(fmt(sec.checked))}</p>
     ${adv.length ? `<div class="wrap"><table class="checks"><thead><tr><th>Severity</th><th>Package</th><th>Installed</th><th>Advisory</th><th>Affected</th></tr></thead><tbody>
       ${adv.map(a => `<tr><td><span class="badge ${a.severity === "low" ? "sev-1" : "sev-2"}">${esc(a.severity || "?")}</span></td><td><code>${esc(a.package)}</code></td>
         <td>${esc(a.version)}</td><td>${/^https?:\/\//.test(a.link || "") ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ${ic("ext", "sm")}</a>` : esc(a.title)}${a.cve ? ` <span class="sub">${esc(a.cve)}</span>` : ""}</td>
@@ -638,7 +639,8 @@ async function loadT3m(p, e, refreshNow) {
   const sec = d.security, adv = sec?.advisories || [], php = sec?.php;
   const secStat = !sec ? ["–", "Not checked yet", "sub"]
     : adv.length ? ["At risk", nn(adv.length, "advisory").replace("advisorys", "advisories"), "sev-2"]
-    : php?.severity ? ["Clean", php.text, `sev-${php.severity}`] : ["Clean", "No advisories", "sev0"];
+    : php?.severity ? ["Clean", php.text, `sev-${php.severity}`]
+    : sec.nginx?.severity ? ["Clean", sec.nginx.text, `sev-${sec.nginx.severity}`] : ["Clean", "No advisories", "sev0"];
   const stat = (k, v, sub, cls = "sub") => `<div class="t3stat"><div class="t3stat-k">${k}</div><div class="t3stat-v">${v}</div><div class="${cls}">${sub}</div></div>`;
   const [dbN, ...dbV] = dbShort(c.db).split(" "), [webN, webV] = String(c.webserver || "").split("/"), [osN, ...osV] = String(c.os || "").split(" ");
   const chip = (n, v, full) => n ? `<span class="t3chip" title="${esc(full || "")}">${esc(n)} <b>${esc(v || "")}</b></span>` : "";
@@ -1379,7 +1381,7 @@ async function saveEmail(extra) {
 }
 
 // Scheduler: one row per task (status, on/off, run now); the chevron opens last result + schedule.
-const SCHED_ICONS = {typo3_release: "tag", t3monitor: "activity", security: "shield", typo3_news: "bell"};
+const SCHED_ICONS = {typo3_release: "tag", t3monitor: "activity", security: "shield", typo3_news: "bell", releases: "tag"};
 const schedOpen = new Set();
 function relTime(iso) {   // "today 12:06", "yesterday 16:22", "tomorrow 07:00", else "18 Nov 16:22"
   if (!iso) return "–";
