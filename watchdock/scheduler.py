@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import threading
+import urllib.parse
 
 from .core import app_url, config, load, lock, log, now, save, save_config, stop_event
 from .db import kv_get, kv_set, sched_result_set, sched_results, typo3_latest
@@ -287,7 +288,9 @@ def version_report():
     envs = list(T3M_ENVS)
     out, advs, count = [], [], {t: 0 for t in ICONS}
     for p, env, d in sorted(sites, key=lambda x: (order.get(x[0]["id"], 999), envs.index(x[1]))):
-        base = {"project": p["id"], "name": p["name"], "env": env, "env_label": T3M_ENVS[env]["label"]}
+        u = urllib.parse.urlsplit((t3m_cfg(p, env).get("url") or "").strip())
+        base = {"project": p["id"], "name": p["name"], "env": env, "env_label": T3M_ENVS[env]["label"],
+                "url": f"{u.scheme}://{u.netloc}/" if u.scheme in ("http", "https") and u.netloc else None}
         pos = (order.get(p["id"], 999), envs.index(env))   # advisories: by site, then severity
         adv = (load(t3m_history_file(p["id"], env), {"snapshots": []}).get("security") or {}).get("advisories") or []
         db, kind = db_state(d.get("db"), rel)
