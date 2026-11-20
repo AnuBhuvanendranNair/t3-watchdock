@@ -1417,7 +1417,7 @@ async function viewVersions(rep) {
     catch (e) { v.innerHTML = `<div class="sched"><div class="sched-head"><h1>Versions</h1></div><p class="empty">${esc(e.message)}</p></div>`; return; }
     if (v.dataset.pview !== "versions") return;
   }
-  const c = rep.counts, need = s => s.cells.some(x => x.tone === "bad" || x.tone === "warn");
+  const c = rep.site_counts || {bad: 0, warn: 0, ok: 0, partial: 0}, need = s => s.cells.some(x => x.tone === "bad" || x.tone === "warn");
   const sites = rep.sites.filter(s => vrFilter === "all" || (vrFilter === "bad" ? s.cells.some(x => x.tone === "bad") : need(s)));
   const stat = (k, n, sub, cls) => `<div class="t3stat"><div class="t3stat-k">${k}</div><div class="t3stat-v ${cls}">${n}</div><div class="sub">${sub}</div></div>`;
   let prev = null;
@@ -1449,10 +1449,10 @@ async function viewVersions(rep) {
       <p>TYPO3, PHP, database and web server of every site compared with the newest releases · updated ${esc(relTime(rep.generated))} · daily email in <a href="#/scheduler">Scheduler</a></p></div>
       ${progBtn("versions", "Refresh versions now", `data-act="vrrefresh"`)}</div>
     <div class="t3stats vr-stats">
-      ${stat("Sites", rep.sites.length, "Production and staging", "")}
-      ${stat("Security / end of life", c.bad, "Needs action", c.bad ? "sev-2" : "")}
-      ${stat("Updates", c.warn, "Newer release available", c.warn ? "sev-1" : "")}
-      ${stat("Current", c.ok, `${c.muted} not checked`, c.ok ? "sev0" : "")}</div>
+      ${stat("Sites", rep.sites.length, "Production and staging counted separately", "")}
+      ${stat("Need security action", c.bad, "At least one red version", c.bad ? "sev-2" : "")}
+      ${stat("Need an update", c.warn, "At least one orange version, no red", c.warn ? "sev-1" : "")}
+      ${stat("Up to date", c.ok, c.partial ? `${c.partial} with parts not checked` : "Everything green", c.ok ? "sev0" : "")}</div>
     <div class="vr-bar"><div class="vr-legend">${Object.keys(VR_TONE).map(t => `<span>${vrIc(t)}${esc(VR_TONE[t][1])}</span>`).join("")}</div>
       <select name="vr-filter" aria-label="Filter sites">${[["all", "All sites"], ["need", "Needs action"], ["bad", "Security / end of life only"]]
         .map(([k, l]) => `<option value="${k}" ${vrFilter === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>

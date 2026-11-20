@@ -325,7 +325,15 @@ def version_report():
               ["MySQL", " · ".join(live(rel["mysql"])[:3]) or "–"],
               ["nginx", " · ".join(f"{v} ({b})" for b, v in rel["nginx"].items()) or "–"],
               ["Apache", " · ".join(live(rel["apache"])) or "–"]]
-    rep = {"generated": now(), "sites": out, "advisories": advs, "newest": newest, "counts": count,
+    # per instance: worst status of its 4 versions (security > update > up to date); "partial" = some not checked
+    worst = lambda st: "bad" if "bad" in st else "warn" if "warn" in st else "ok"
+    site_counts = {"bad": 0, "warn": 0, "ok": 0, "partial": 0}
+    for x in out:
+        tones = [c["tone"] for c in x["cells"]]
+        x["status"] = worst(tones)
+        site_counts[x["status"]] += 1
+        site_counts["partial"] += x["status"] == "ok" and "muted" in tones
+    rep = {"generated": now(), "sites": out, "advisories": advs, "newest": newest, "counts": count, "site_counts": site_counts,
            "cols": [c for _, c in REPORT_COLS], "legend": [[t, m] for t, (_, m) in ICONS.items()]}
     kv_set("version_report", rep)
     return rep
@@ -337,21 +345,22 @@ def task_daily_report():
         rep = version_report()
     except RuntimeError as e:
         return str(e)
-    count, n = rep["counts"], len(rep["sites"])
+    sc, n = rep["site_counts"], len(rep["sites"])
     cell = lambda x, kind=True: {"text": x["version"], "icon": x["tone"],
                                  "sub": f"{x['kind']} · {x['label']}" if kind else x["label"]}
     rows = [[s["name"], s["env_label"], cell(s["cells"][0], False), cell(s["cells"][1], False),
              cell(s["cells"][2]), cell(s["cells"][3])] for s in rep["sites"]]
     adv_rows = [[a["name"], a["env_label"], {"text": a["title"], "sub": a["sub"]},
                  {"text": a["severity"], "icon": a["tone"]}] for a in rep["advisories"]]
-    bad, warn = count["bad"], count["warn"]
+    bad, warn = sc["bad"], sc["warn"]
     headline = (f"All {_n(n, 'site')} up to date" if not bad and not warn else
-                " · ".join(x for x in (bad and f"{bad} security / end of life", warn and _n(warn, "update")) if x))
-    notify_event(f"Daily version report: {bad} critical · {_n(warn, 'update')}",
+                " · ".join(x for x in (bad and f"{_n(bad, 'site')} need security action",
+                                       warn and f"{_n(warn, 'site')} need an update") if x))
+    notify_event(f"Daily version report: {bad} security · {warn} update · {sc['ok']} up to date",
                  "TYPO3, PHP, database and web server of every site compared with the newest releases.", [],
                  app_url("#/versions"), "Open version report", headline=headline,
-                 stats=[("Sites", n, None), ("Security / end of life", bad, "bad" if bad else "muted"),
-                        ("Updates", warn, "warn" if warn else "muted"), ("Current", count["ok"], "ok" if count["ok"] else "muted")],
+                 stats=[("Sites", n, None), ("Need security action", bad, "bad" if bad else "muted"),
+                        ("Need an update", warn, "warn" if warn else "muted"), ("Up to date", sc["ok"], "ok" if sc["ok"] else "muted")],
                  sections=[
                      {"title": "Sites", "legend": [tuple(x) for x in rep["legend"]],
                       "widths": ["15%", "11%", "19%", "18%", "19%", "18%"],
@@ -361,7 +370,7 @@ def task_daily_report():
                       "widths": ["16%", "10%", "", "12%"], "cols": ["Site", "Environment", "Advisory", "Severity"],
                       "rows": _grouped(adv_rows)},
                      {"title": "Newest releases", "rows": rep["newest"]}])
-    return f"{_n(n, 'site')} · {bad} critical · {_n(warn, 'update')} · {len(adv_rows)} advisories"
+    return f"{_n(n, 'site')} · {bad} need security action · {warn} need an update · {len(adv_rows)} advisories"
 
 
 def task_typo3_news():
