@@ -267,7 +267,12 @@ async function runProg(key, tasks, conc = 4) {        // tasks: async functions;
 const projView = () => { try { return localStorage.getItem("projectsView") === "list" ? "list" : "grid"; } catch (e) { return "grid"; } };
 function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload needed
   const projectsWithRuns = new Set(S.projects_with_runs || []);
-  const cards = S.projects.map(p => {
+  // Terminal style: monitored projects (at least one instance with URL + key) first, alphabetically; the rest below
+  const list = document.documentElement.dataset.style !== "terminal" ? S.projects : [...S.projects].sort((a, b) => {
+    const ca = T3M_ENVS.some(e => t3mOn(a, e)), cb = T3M_ENVS.some(e => t3mOn(b, e));
+    return ca !== cb ? (ca ? -1 : 1) : a.name.localeCompare(b.name, undefined, {sensitivity: "base"});
+  });
+  const cards = list.map(p => {
     const last = S.runs.find(r => r.project === p.id);
     const monitoring = T3M_ENVS.filter(e => p[e.cfg]?.url).map(e => {
       const ready = t3mOn(p, e);
@@ -286,6 +291,7 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
       <div class="focus-monitoring" role="group" aria-label="TYPO3 monitoring">
         ${monitoring || `<span class="focus-monitor">Monitoring not configured</span>`}
       </div>
+      ${T3M_ENVS.some(e => t3mOn(p, e)) ? `<div class="focus-updates" data-upd="${esc(p.id)}" role="group" aria-label="Pending updates">${cardUpdatesHtml(p)}</div>` : ""}
       <div class="focus-project-run" role="group" aria-label="GitLab CI/CD">
         ${!hasCI(p) ? `<span class="focus-monitor focus-ci is-disabled">CI/CD · Disabled</span>` : last
           ? `<a class="focus-monitor focus-ci is-configured" href="${pUrl(p)}/pl/${Number(last.pipeline)}" aria-label="Open latest CI/CD run #${esc(last.pipeline)}">CI/CD · #${esc(last.pipeline)}</a> <span data-runst="${esc(p.id)}">${runStatusHtml(p.id, true)}</span>`
@@ -321,6 +327,30 @@ function viewProjects(fresh) {   // fresh = T3SUM was just fetched, no reload ne
   if (!fresh) loadT3mSummary();                      // ... then update in the background
 }
 
+// Project card (shown by the Terminal style): pending updates per monitored instance as icons, from the last health check (T3SUM)
+function cardUpdatesHtml(p) {
+  const s = T3SUM?.[p.id];
+  if (!s) return `<span class="sub">${T3SUM ? "No data yet" : "Loading…"}</span>`;
+  return T3M_ENVS.filter(e => t3mOn(p, e)).map(e => {
+    const x = s[e.env];
+    const head = `<span class="upd-env">${esc(e.short)}</span>`;
+    if (!x?.has_data) return `<div class="upd-row">${head}<span class="sub">${x?.last_error ? "check failed" : "no data yet"}</span></div>`;
+    // icon only; the full text is in the tooltip / aria-label (extensions also show their count)
+    const chip = (cls, icon, tip, n) => `<span class="upd-chip ${cls}" title="${esc(tip)}" role="img" aria-label="${esc(tip)}">${ic(icon)}${n ? `<b>${n}</b>` : ""}</span>`;
+    const latest = S.typo3_latest?.[String(x.typo3 || "").split(".")[0]];
+    const chips = [
+      latest && x.typo3 && verCmp(latest, x.typo3) > 0 && chip("sev-1", "t3", `TYPO3 ${x.typo3} · update to ${latest} available`),
+      x.ext_updates && chip(x.ext_major ? "sev-2" : "sev-1", "puzzle", extUpdTitle(x), x.ext_updates),
+      x.php_check?.severity > 0 && chip(`sev-${x.php_check.severity}`, "php", x.php_check.text),
+      x.nginx_check?.severity > 0 && chip(`sev-${x.nginx_check.severity}`, "nginx", x.nginx_check.text),
+    ].filter(Boolean);
+    return `<div class="upd-row">${head}${chips.join("") || chip("sev0", "ok", "Up to date: no pending TYPO3, extension, PHP or nginx updates")}</div>`;
+  }).join("");
+}
+function paintCardUpdates() {
+  document.querySelectorAll("[data-upd]").forEach(el => { const p = proj(el.dataset.upd); if (p) el.innerHTML = cardUpdatesHtml(p); });
+}
+
 // Instance with pending extension updates: tinted background (accent = updates, orange = at least one major update)
 const extUpdCls = x => x?.ext_updates ? (x.ext_major ? "extupd major" : "extupd") : "";
 const extUpdTitle = x => x?.ext_updates ? `${x.ext_updates} extension update${x.ext_updates === 1 ? "" : "s"} pending${x.ext_major ? ` (${x.ext_major} major)` : ""}` : "";
@@ -332,6 +362,7 @@ async function loadT3mSummary(pre) {
   let d;
   try { d = pre ?? await api("/api/t3monitor/summary"); T3SUM = d; }
   catch (err) { if ($("#t3sum")) $("#t3sum").innerHTML = `<h2>TYPO3 status</h2><p class="empty">Error: ${esc(err.message)}</p>`; return; }
+  paintCardUpdates();
   const box = $("#t3sum"); if (!box) return;
   // labelled server values; ref = production instance: staging values that differ get ≠ (orange)
   const srvTags = (x, ref) => [["PHP", "php", x.php, x.php], ["DB", "db", dbShort(x.db), x.db], ["Web", "webserver", x.webserver, x.webserver]]
