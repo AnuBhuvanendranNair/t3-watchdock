@@ -216,23 +216,30 @@ def t3m_fetch(project, env="production", alert=True):
     try:
         if not url or not key:
             raise RuntimeError("t3monitor URL or key missing")
-        q = urllib.parse.urlencode({"t3monitor": 1, "secret": key[:32], "reports": T3M_REPORTS})
         headers = {"User-Agent": "t3-watchdock"}
         auth_user = t3m_cfg(project, env).get("auth_user") or ""
         if auth_user:
             cred = f"{auth_user}:{t3m_auth_password(pid, env)}".encode()
             headers["Authorization"] = "Basic " + base64.b64encode(cred).decode()
-        req = urllib.request.Request(url.rstrip("/") + "/?" + q, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                raw = r.read().decode("utf-8", errors="replace").strip()
-        except urllib.error.HTTPError as e:
-            if e.code == 401:
-                raise RuntimeError("HTTP 401: Basic auth required or wrong (set user/password in the project's "
-                                   "t3monitor settings)") from None
-            raise RuntimeError(f"HTTP {e.code}: {_plain(e.read().decode(errors='replace'), 200)}") from None
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Site not reachable: {e.reason}") from None
+        # t3monitor >= TYPO3 12 answers "?t3monitor=1" (middleware); on TYPO3 10/11 only "?eID=t3monitor" works and
+        # "?t3monitor=1" falls through to the site's 404 page -> retry with eID on 404.
+        triggers = ({"t3monitor": 1}, {"eID": "t3monitor"})
+        for i, trigger in enumerate(triggers):
+            q = urllib.parse.urlencode({**trigger, "secret": key[:32], "reports": T3M_REPORTS})
+            req = urllib.request.Request(url.rstrip("/") + "/?" + q, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    raw = r.read().decode("utf-8", errors="replace").strip()
+                break
+            except urllib.error.HTTPError as e:
+                if e.code == 404 and i + 1 < len(triggers):
+                    continue
+                if e.code == 401:
+                    raise RuntimeError("HTTP 401: Basic auth required or wrong (set user/password in the project's "
+                                       "t3monitor settings)") from None
+                raise RuntimeError(f"HTTP {e.code}: {_plain(e.read().decode(errors='replace'), 200)}") from None
+            except urllib.error.URLError as e:
+                raise RuntimeError(f"Site not reachable: {e.reason}") from None
         data = t3m_parse(t3m_decrypt(key, raw))
         t3m_add_updates(data)
     except Exception as e:
