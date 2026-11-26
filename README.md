@@ -10,7 +10,7 @@
 > Optional, cosmetic: `cd .. && mv gitlab-launcher t3-watchdock && cd t3-watchdock`.
 > Your `config.json`, `state.json` and key files are local and gitignored — untouched by the rename. Since the database switch, the first start imports `config.json` and `state.json` into `watchdock.db` (see *Configuration*).
 
-Small local web app to start GitLab pipelines, watch their jobs and play manual jobs — plus:
+Small self-hosted web app to start GitLab pipelines, watch their jobs and play manual jobs — plus:
 
 - a **TYPO3 release watcher** that starts the staging pipelines automatically when a new TYPO3 version is published,
 - **notifications** in Microsoft Teams (or by email) before and after these automatic runs,
